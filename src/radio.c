@@ -166,6 +166,24 @@ static void supply_cb(void *arg) {
             cfg_pwr_set(BOARD_PWR_MAX_BAT);
             msg_schedule_text_fmt("TX power %0.0f W on battery", BOARD_PWR_MAX_BAT);
         }
+#ifdef BOARD_BL_MAX_BAT
+        /* The brightness the same way: down to the cap if above it, not raised back */
+        if (params.brightness_normal > BOARD_BL_MAX_BAT || params.brightness_idle > BOARD_BL_MAX_BAT) {
+            params_lock();
+            if (params.brightness_normal > BOARD_BL_MAX_BAT) {
+                params.brightness_normal       = BOARD_BL_MAX_BAT;
+                params.dirty.brightness_normal = true;
+            }
+            if (params.brightness_idle > BOARD_BL_MAX_BAT) {
+                params.brightness_idle       = BOARD_BL_MAX_BAT;
+                params.dirty.brightness_idle = true;
+            }
+            params_unlock(NULL);
+            if (backlight_level() > BOARD_BL_MAX_BAT) {
+                backlight_set_brightness(BOARD_BL_MAX_BAT);
+            }
+        }
+#endif
     }
 }
 #endif

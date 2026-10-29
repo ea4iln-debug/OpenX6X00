@@ -32,6 +32,12 @@
 #define BOARD_PWR_MAX       10.0f
 #endif
 
+/* And on battery the screen at most half as bright as it goes: 4 of 0..9, Xiegu's 5 of 1..10 (the
+ * same PWM) */
+#ifdef BOARD_X6200
+#define BOARD_BL_MAX_BAT    4
+#endif
+
 #ifdef HOST_BUILD
 /* The GUI on a PC (cmake -DHOST_BUILD=ON): an SDL window for the panel, the stub radio, and the
  * front keys and knobs as FIFOs under the data directory that host/host_panel.c writes the PC's
