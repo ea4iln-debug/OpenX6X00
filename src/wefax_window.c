@@ -253,13 +253,14 @@ static const freq_list_item_t *entry_at(const freq_list_item_t *list, int n, int
 }
 
 /* A channel's name as listed: what follows WEFAX (all of it when nothing does), no '#' (it
- * would break the header's colours) */
+ * would break the header's colours). '#' is skipped with the separators, so "WEFAX #" is not
+ * listed with an empty name */
 static void channel_name(char *out, size_t size, const char *name)
 {
     const char *p = name + 5;
     size_t      o = 0;
 
-    while (*p == ' ' || *p == '-' || *p == '_' || *p == ':' || *p == '.' || *p == '/')
+    while (*p == ' ' || *p == '-' || *p == '_' || *p == ':' || *p == '.' || *p == '/' || *p == '#')
         p++;
     if (!*p)
         p = name;
