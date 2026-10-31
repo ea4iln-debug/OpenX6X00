@@ -98,7 +98,8 @@ static void button_event(const struct input_event *in) {
     }
     if (in->value == 1) {
         send(KEYPAD_PRESS);
-        hold_timer = lv_timer_create(held_cb, hold_ms, NULL);
+        /* POWER's hold switches the radio off: always the full time, also where an app shortens the rest (JS8) */
+        hold_timer = lv_timer_create(held_cb, cur.key == KEYPAD_POWER ? HOLD_MS : hold_ms, NULL);
         lv_timer_set_repeat_count(hold_timer, 1);
     } else if (cur.state == KEYPAD_PRESS) {
         send(KEYPAD_RELEASE);

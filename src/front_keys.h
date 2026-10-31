@@ -31,5 +31,5 @@ keypad_t *keypad_init(char *dev_name);
 void keypad_power_set(bool down);
 
 /* Bottom buttons: a hold is a press longer than this many ms (0: back to 1 s), for an app
- * that wants quicker holds while it is open */
+ * that wants quicker holds while it is open. POWER keeps 1 s: its hold switches the radio off */
 void keypad_set_long_time(uint32_t hold);
