@@ -14,12 +14,14 @@
 /* The bars on the main screen, shown in CW and CW-R with the tune setting on */
 void cw_tune_init(lv_obj_t *parent);
 
-/* Audio thread (cw.cpp): key tone minus the received tone, in Hz */
+/* Audio thread (cw.cpp): key tone minus the received tone, in Hz, as the X6100 hears it: in CW the dial minus
+ * the station, the bar lit on the station's side; in CW-R the other way round. CW on the X6200, whose tone rises
+ * as the dial goes up, sends it turned round */
 void cw_tune_set_freq(float hz);
 
 /* VISION: the bars at y (the CW decoder panel's top line), -1 back where the style puts them */
 void cw_tune_set_y(lv_coord_t y);
 
-/* Any thread: the last offset (Hz, key tone minus the received tone) when it came in the
+/* Any thread: the last offset (Hz, as cw_tune_set_freq() had it) when it came in the
  * last second, for the remote clients */
 bool cw_tune_recent(int *hz);

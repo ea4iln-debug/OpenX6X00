@@ -38,6 +38,7 @@ static std::atomic<bool> started{false};
 static std::atomic<bool> decode_on{false};
 static std::atomic<bool> tune_on{false};
 static std::atomic<bool> trainer{false};
+static std::atomic<bool> tune_turned{false};   /* the bars' offset turned round: CW on the X6200 */
 static int32_t key_tone = 0;
 static int32_t band_lo;
 static int32_t band_hi;
@@ -85,6 +86,7 @@ static std::string sq_pending;
 static void on_flag(Subject *subj, void *user_data);
 static void on_rx_param_change(Subject *subj, void *user_data);
 static void on_freq_change(Subject *subj, void *user_data);
+static void on_mode_change(Subject *subj, void *user_data);
 
 static void on_text(const char *text);
 static void on_keyed(bool on);
@@ -102,6 +104,7 @@ void cw_init(void) {
     cfg_sm.cp_cur_filter_high.subscribe_and_notify(on_rx_param_change);
     last_freq = cfg_sm.cp_fg_freq.get();
     cfg_sm.cp_fg_freq.subscribe(on_freq_change);
+    cfg_sm.cp_cur_mode.subscribe_and_notify(on_mode_change);
     tone_freq = key_tone;
 
     receiver  = new cw::Receiver(on_text, on_keyed, on_frame);
@@ -276,7 +279,7 @@ static void on_frame() {
     if (++frame_counter >= TUNE_UPDATE_FRAMES) {
         frame_counter = 0;
         if (tuned) {
-            cw_tune_set_freq(key_tone - tone_freq);
+            cw_tune_set_freq(tune_turned ? tone_freq - key_tone : key_tone - tone_freq);
         }
     }
 }
@@ -297,6 +300,15 @@ static void on_flag(Subject *subj, void *user_data) {
     auto *flag = static_cast<std::atomic<bool> *>(user_data);
 
     *flag = static_cast<SubjectT<int32_t> *>(subj)->get() != 0;
+}
+
+/* The tune bars as the X6100 lights them: in CW on the station's side of the dial (the key tone minus the tone,
+ * CW's tone falling as the dial goes up), in CW-R the other way round. The X6200's CW tone rises as the dial
+ * goes up, as CW-R's does: there the offset is turned round in CW, the bars the same way up on both radios (#115) */
+static void on_mode_change(Subject *subj, void *user_data) {
+    radio_mode_t mode = (radio_mode_t)cfg_sm.cp_cur_mode.get();
+
+    tune_turned = mode == radio_mode_cw && radio_cw_tone_dir(mode) > 0;
 }
 
 static void on_rx_param_change(Subject *subj, void *user_data) {
