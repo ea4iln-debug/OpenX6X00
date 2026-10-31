@@ -48,7 +48,7 @@ static int              est_min = -1;
 static bool             est_approx;
 static bool             est_ext;        /* the estimate was made on external power */
 static bool             no_battery;     /* the base found no battery */
-static lv_coord_t       power_col = 4;  /* the power row's gaps: after each sign, and more before the supply's */
+static lv_coord_t       power_col = 4;  /* the power row's gaps: between the labels, and more before the supply's */
 static lv_coord_t       power_half = 4; /* (power_gaps) */
 
 static void check_time_sync_cb(lv_timer_t * t);
@@ -56,8 +56,9 @@ static time_t get_last_sync_time();
 
 /* % + V on a supply is the widest choice: "100%" with both signs and the supply's voltage is wider than the
  * box with the wider fonts (DejaVu, the default, and Sony in VISION's box). Then the gaps narrow, the one
- * between the two halves last: 4 px after each sign and 4 more before the supply's when there is room, else
- * 2 or 1 after each sign and what is left (up to 4) before the supply's. The usual gaps in the other choices */
+ * between the two halves last: 4 px between the labels and 4 more before the supply's sign when there is room,
+ * else 2 or 1 between the labels and what is left (up to 4 more) before the supply's sign. The usual gaps in
+ * the other choices */
 static void power_gaps(bool fit) {
     lv_obj_t  *row  = lv_obj_get_parent(power_labels[0]);
     lv_obj_t  *box  = lv_obj_get_parent(row);
@@ -70,7 +71,8 @@ static void power_gaps(bool fit) {
         for (int i = 0; i < 4; i++) {
             const char *t = lv_label_get_text(power_labels[i]);
 
-            room -= lv_txt_get_width(t, strlen(t), lv_obj_get_style_text_font(power_labels[i], 0), 0, LV_TEXT_FLAG_NONE);
+            room -= lv_txt_get_width(t, strlen(t), lv_obj_get_style_text_font(power_labels[i], 0), 0,
+                                     LV_TEXT_FLAG_NONE);
         }
         if (room < 3 * col + half) {
             col  = room >= 3 * 2 + 4 ? 2 : 1;
