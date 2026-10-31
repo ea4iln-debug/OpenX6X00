@@ -66,8 +66,17 @@ const char *hw_base_ver_str(void) {
     return "stub";
 }
 
+/* None: the X6100's ways. HOST_STUB_CW=x6200: the X6200's CW, its spectrum on the dial and the tone rising as the
+ * dial goes up in CW too (#115), to see its picture on a PC: the carrier keeps its place in the stream, 1 kHz off
+ * the dial in SSB, in every mode (the S-meter from the stream still takes the X6100's CW band) */
 uint32_t hw_caps(void) {
-    return 0;
+    static int cw = -1;
+
+    if (cw < 0) {
+        const char *e = getenv("HOST_STUB_CW");
+        cw = e && !strcmp(e, "x6200");
+    }
+    return cw ? HW_CAP_CW_SPECTRUM_ON_DIAL | HW_CAP_CW_TONE_RISES : 0;
 }
 
 /* ---- Settings ------------------------------------------------------------------------- */
