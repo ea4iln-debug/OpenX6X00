@@ -26,6 +26,7 @@ extern "C" {
     #include "audio.h"
     #include "cw_decoder.h"
     #include "cw_tune_ui.h"
+    #include "radio.h"
 }
 
 /* Frames (8 ms) between updates of the tune indicator */
@@ -108,18 +109,19 @@ void cw_init(void) {
     started   = true;
 }
 
-/* The tone moves in the audio as the VFO turns: CW is the upper sideband (a higher
- * VFO lowers the tone), CW-R the lower one. Big jumps (band, memory) are left to
- * the tracker: the station is gone anyway. */
+/* The tone moves in the audio as the VFO turns: CW on the X6100 is the upper sideband
+ * (a higher VFO lowers the tone), CW-R the lower one, and so is CW on the X6200 (#115:
+ * there the tone of a dial step of +150 Hz was followed 150 Hz down; it went 150 Hz up).
+ * Big jumps (band, memory) are left to the tracker: the station is gone anyway. */
 static void on_freq_change(Subject *subj, void *user_data) {
     int32_t freq = cfg_sm.cp_fg_freq.get();
     int32_t d    = freq - last_freq;
-    int32_t mode = cfg_sm.cp_cur_mode.get();
+    int     dir  = radio_cw_tone_dir((radio_mode_t)cfg_sm.cp_cur_mode.get());
 
     last_freq = freq;
-    if ((mode == radio_mode_cw || mode == radio_mode_cwr) && d != 0 && d >= -1500 && d <= 1500) {
+    if (dir && d != 0 && d >= -1500 && d <= 1500) {
         float s = rx_shift.load();
-        while (!rx_shift.compare_exchange_weak(s, s + (mode == radio_mode_cw ? -d : d))) {}
+        while (!rx_shift.compare_exchange_weak(s, s + dir * d)) {}
     }
 }
 
