@@ -10,7 +10,8 @@
  * - a field emptied (as the browser empties one typed "3k") keeps the radio's edge;
  * - one edge typed alone comes out as the radio's own Filter low or Filter high would make it: in CW the other
  *   edge moves with it around the key tone (in the other modes it stays);
- * - the passband on the panorama: both sides in AM, NFM, SAM and WFM, as the radio's spectrum draws it.
+ * - the passband on the panorama: both sides in AM, NFM, SAM and WFM, as the radio's spectrum draws it; in CW
+ *   around the dial, the X6200's ("cwrise", #115) the other way round, also with the low edge at 0 (the widest).
  * node panel-filter.js <filter-rules binary> */
 'use strict';
 const path = require('path');
@@ -166,6 +167,13 @@ for (const g of groups) {
   const want = g.m === 0 || g.m === 1 ? [-st.fhi, -st.flo] : g.m === 4 ? [st.flo - kt, st.fhi - kt] : g.m === 5 ? [kt - st.fhi, kt - st.flo]
              : g.m >= 6 ? [-st.fhi, st.fhi] : [st.flo, st.fhi];
   check(grp, 'the passband on the panorama at ' + st.flo + '-' + st.fhi, p.ctx.passband ? p.ctx.passband(st) : 'not in the page', want);
+  if (g.m === 4) {
+    const w = g.widest, band = s => p.ctx.passband ? p.ctx.passband(s) : 'not in the page';
+    check(grp, 'the passband at the widest ' + w.flo + '-' + w.fhi, band(w), [w.flo - w.kt, w.fhi - w.kt]);
+    for (const x of [st, w])
+      check(grp, 'the X6200\'s passband (cwrise) at ' + x.flo + '-' + x.fhi, band(Object.assign({cwrise: 1}, x)),
+            [x.kt - x.fhi, x.kt - x.flo]);
+  }
 }
 
 let bad = 0;

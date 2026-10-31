@@ -3618,7 +3618,9 @@ the https page at `wss://<address>/ws/remote`, which the web server hands on):
 `panel 1` subscribes to the state (`state {...}` as JSON: frequency, mode,
 filter, the switches and the levels, whenever something changes; `lock` is 1
 while the frequency is locked by the user or held by an app, `ulock` the
-user's lock alone), the
+user's lock alone; `kt` the key tone, and `cwrise` 1 where CW's tone rises
+as the dial goes up, as CW-R's does, the X6200: its CW passband lies like
+CW-R's), the
 S-meter (`m <dB>`, ten a second), the TX meters (`t <W> <SWR> <ALC>`), the
 bands and the band plan (`bands`, `plan`; again when either changes: another
 plan or region, a band edited on the web page), the spots (`spots [...]`) and the

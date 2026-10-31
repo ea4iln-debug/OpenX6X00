@@ -521,12 +521,14 @@ body.app h2, body.app #intro, body.app #intro-away { display:none; }
   function keyTone(s) { return typeof s.kt === "number" ? s.kt : 700; }
   /* The passband around the dial, in Hz. In CW and CWR the edges are tones, and the signal heard at the key
    * tone is on the dial: the band is around it in both, as on the radio (#34: it was beside it, a pitch off).
+   * Where the tone rises as the dial goes up (CWR; CW too on the X6200, "cwrise", #115) it is the other way
+   * round: a low edge at 0 leaves it off centre on the other side.
    * AM, NFM, SAM and WFM: both sides of the high edge, as the radio draws it (#91: SAM and WFM had one) */
   function passband(s) {
     const kt = keyTone(s);
     if (s.mode === 0 || s.mode === 1) return [-s.fhi, -s.flo];      /* LSB */
-    if (s.mode === 4) return [s.flo - kt, s.fhi - kt];               /* CW */
-    if (s.mode === 5) return [kt - s.fhi, kt - s.flo];               /* CWR */
+    if (s.mode === 4 && !s.cwrise) return [s.flo - kt, s.fhi - kt];  /* CW */
+    if (s.mode === 4 || s.mode === 5) return [kt - s.fhi, kt - s.flo];   /* CWR, the X6200's CW */
     if (filterKind(s.mode) === "am") return [-s.fhi, s.fhi];
     return [s.flo, s.fhi];
   }

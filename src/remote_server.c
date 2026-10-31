@@ -262,6 +262,7 @@ typedef struct {
     int32_t tune, tune_s;   /* TUNE for an external tuner on, its time limit */
     bool    tx, lock;
     bool    ulock;          /* the user's lock alone (LOCK), not an app's hold: the page's LOCK button */
+    bool    cwrise;         /* CW's tone rises with the dial, as CW-R's (the X6200): its CW passband the other side */
 } pstate_t;
 
 /* A change asked by a panel client, for the LVGL thread */
@@ -1063,6 +1064,7 @@ static void pstate_read(pstate_t *s) {
     s->flo   = cparam_i_get(cfg_cur_filter_low);
     s->fhi   = cparam_i_get(cfg_cur_filter_high);
     s->kt    = param_i_get(cfg_key_tone);       /* CW: the filter edges are tones, the band is around the dial */
+    s->cwrise = radio_cw_tone_dir(radio_mode_cw) > 0;
     s->agc   = cparam_i_get(cfg_cur_agc);
     s->pre   = cparam_i_get(cfg_cur_pre);
     s->att   = cparam_i_get(cfg_cur_att);
@@ -1088,10 +1090,11 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
     snprintf(buf, n,
              "state {\"freq\":%d,\"mode\":%d,\"flo\":%d,\"fhi\":%d,\"kt\":%d,\"agc\":%d,\"pre\":%d,\"att\":%d,"
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
-             "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d}",
+             "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
+             "\"cwrise\":%d}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock);
+             s->ulock, s->cwrise);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
