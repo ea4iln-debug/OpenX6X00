@@ -2014,9 +2014,10 @@ the sidetone's level, 0 to 32 on the X6100 and 0 to 63 on the X6200.
 
 ### CW decoder
 
-In CW mode the decoder buttons are on the CW pages (CW 1:2, 2:2): Decoder
-on/off, Tuner (tuning indicator), Dec SNR, CW peak and CW peak Q. Text and
-speed (WPM) appear in the panel over the waterfall.
+In CW mode the decoder buttons are on the CW pages: CW 1:2 has ZAP, CW
+peak, CW peak Q and Log QSO, CW 2:2 Decoder on/off, Tuner (tuning
+indicator), Dec SNR and Parse. Text and speed (WPM) appear in the panel
+over the waterfall.
 
 - The receiver comes from gdyuldin x6100_gui 1.0.1: a coherent tone tracker
   that follows the station inside the CW filter, a detector with a noise
@@ -2033,6 +2034,20 @@ speed (WPM) appear in the panel over the waterfall.
   nothing is decoded. A key-down longer than 8 dots (tune-up) is ignored.
 - Upstream bugs fixed here: a strong station slightly off tune was never
   decoded, and a dash cut by a retune came out as a dot.
+
+In CW and CW-R a station on the dial sounds at the key tone (KEY > Tone),
+on the X6100 and the X6200 alike, and the waterfall, the spectrum and the
+browser Panel draw it on the VFO line, in the middle of the passband. Up to
+v0.3.8 the X6200 drew it a key tone off the line, below it in CW and above
+it in CW-R, and in CW its ZAP and Tuner went the wrong way (#115).
+
+- ZAP tunes to the station the decoder follows, to 10 Hz: it then sounds at
+  the key tone. The decoder follows keyed signals, not a steady carrier.
+- Tuner: a row of bars under the frequency while the decoder follows a
+  station, the middle one when it sounds at the key tone, one bar further
+  for each 10 Hz off, in green, yellow or red. In CW the lit bar is on the
+  station's side of the dial: turn the dial towards it. In CW-R it is the
+  other way round.
 
 Parse. Where: CW 2:2 > Parse (on by default). The decoder often runs words
 together when the spacing is tight: "CQCQDEON6UREK". With Parse on, each
