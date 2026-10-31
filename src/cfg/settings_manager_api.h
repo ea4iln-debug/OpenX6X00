@@ -46,6 +46,10 @@ bool cfg_tx_range(int32_t freq, int32_t *lo, int32_t *hi);
 /* The band the radio is on is one it can use (band_use over its edges); true between bands */
 bool cfg_band_usable(void);
 
+/* The base's HW_CAP_* bits (radio_caps()), from radio.c once hw_start() ran: the LO offset (cfg_mode_lo_offset) is
+ * computed again from them. None until then */
+void cfg_hw_caps_set(uint32_t caps);
+
 // Persist all pending deferred writes immediately.
 void cfg_api_flush_all(void);
 

@@ -70,6 +70,9 @@ class SettingsManager {
     // The TX power limit of the transverter the radio is tuned through, W, 0 none (#104, pwr_xvtr_set): p_pwr is
     // held to it too, whichever of the two is lower (pwr_top)
     std::atomic<float> pwr_xvtr_{0.0f};
+    // The base's HW_CAP_* bits (radio_types.h), told once hw_start() ran (cfg_hw_caps_set), none before: the LO
+    // offset is computed from them. Declared before cp_mode_lo_offset, whose compute fn reads it
+    uint32_t hw_caps_ = 0;
 
     // -- Parameters (public for C-API / UI access; live for the whole program) --
     // All regular GLOBAL/BAND/MODE params are declared with NSDMI here (one
@@ -593,8 +596,9 @@ class SettingsManager {
     ComputedParameter<int32_t> cp_cur_agc;
     ComputedParameter<int32_t> cp_bg_freq;
 
-    // Computed mode LO offset: CW → -key_tone, CWR → +key_tone, else 0.
-    // Driven by cp_cur_mode and p_key_tone.
+    // Computed mode LO offset, where the base's spectrum is centred: CW → -key_tone,
+    // CWR → +key_tone, else 0; 0 in every mode with HW_CAP_CW_SPECTRUM_ON_DIAL.
+    // Driven by cp_cur_mode, p_key_tone and hw_caps_.
     ComputedParameter<int32_t> cp_mode_lo_offset;
 
     // Computed current filter params for the active MODE category. The compute

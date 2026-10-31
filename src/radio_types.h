@@ -43,6 +43,11 @@ typedef enum {
                                      * base fades its RF out about a second into a TX the host is silent in */
     HW_CAP_TX_NO_ALC    = 1 << 15,  /* the ALC does not follow the drive (the X6200: about 0 from 0.03 to 5 W): digital
                                      * drive held once the power reaches the setting */
+    /* CW as the base receives it. Without these the X6100's way: in CW and CW-R the spectrum is centred on the
+     * oscillator the tone is heard from, the key tone below the dial in CW and above it in CW-R, and CW's tone
+     * falls as the dial goes up. A station on the dial sounds at the key tone on both radios (#115) */
+    HW_CAP_CW_SPECTRUM_ON_DIAL = 1 << 16,   /* the spectrum centred on the dial in CW and CW-R too (the X6200) */
+    HW_CAP_CW_TONE_RISES       = 1 << 17,   /* CW's tone rises as the dial goes up, as CW-R's does (the X6200) */
 } hw_cap_t;
 
 /* The hand mic's keys as the base reports them (mic_keys.c): the X6100 mic's codes. The X6200's library has the

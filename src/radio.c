@@ -297,6 +297,7 @@ void radio_start() {
 
     hw_start();
     base_ver = hw_base_ver();
+    cfg_hw_caps_set(hw_caps());     /* the LO offset from them, before the first frame */
     start_trace("base: version %s", hw_base_ver_str());
     /* What the digital TX level comes from, for a report of an app at 0 W (#16); the base version was nowhere */
     fprintf(stderr, "radio: base %s, line_in %u, line_out %u, play %.1f dB, rec %.1f dB, digital level %.1f dB\n",
@@ -858,6 +859,13 @@ radio_base_ver_t radio_base_ver(void) {
 
 uint32_t radio_caps(void) {
     return hw_caps();
+}
+
+int radio_cw_tone_dir(radio_mode_t mode) {
+    if (mode == radio_mode_cwr || (mode == radio_mode_cw && (radio_caps() & HW_CAP_CW_TONE_RISES))) {
+        return 1;
+    }
+    return mode == radio_mode_cw ? -1 : 0;
 }
 
 const char *radio_base_ver_str(void) {

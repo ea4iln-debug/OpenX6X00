@@ -52,7 +52,8 @@ SettingsManager::SettingsManager()
       cp_cur_pre([this]() { return cur_pre_get(); }, [this](int32_t pre) { cur_pre_set(pre); }),
       cp_cur_agc([this]() { return cur_agc_get(); }, [this](int32_t agc) { cur_agc_set(agc); }),
 
-      // Mode LO offset: CW→-key_tone, CWR→+key_tone, else 0. One-way (no reverse).
+      // Mode LO offset: CW→-key_tone, CWR→+key_tone, else 0 (0 also in CW where the base's
+      // spectrum is centred on the dial). One-way (no reverse).
       cp_mode_lo_offset([this]() { return lo_offset_compute(); }),
 
       // Computed current filter params. The compute fns derive the effective
@@ -1097,9 +1098,15 @@ std::string SettingsManager::encoder_bind_validate(const std::string &val) {
     return result;
 }
 
+/* Where the base's spectrum is centred, Hz from the dial: the X6100's in CW and CW-R on the oscillator the tone is
+ * heard from, the key tone below the dial in CW and above it in CW-R (its lo_freq); the X6200's on the dial in every
+ * mode (HW_CAP_CW_SPECTRUM_ON_DIAL), where this offset drew a station on the dial a pitch off it (#115) */
 int32_t SettingsManager::lo_offset_compute() {
     int32_t mode = cp_cur_mode.get();
     int32_t key_tone = p_key_tone.get();
+    if (hw_caps_ & HW_CAP_CW_SPECTRUM_ON_DIAL) {
+        return 0;
+    }
     if (mode == radio_mode_cw) {
         return -key_tone;
     }

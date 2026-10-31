@@ -118,6 +118,10 @@ radio_base_ver_t radio_base_ver(void);
 const char *radio_base_ver_str(void);
 /* HW_CAP_* bits (radio_types.h): what the base does itself */
 uint32_t radio_caps(void);
+/* CW and CW-R as the base receives them: 1 when the tone rises as the dial goes up (CW-R; CW too with
+ * HW_CAP_CW_TONE_RISES, the X6200), -1 when it falls (CW on the X6100), 0 in the other modes. The tone is
+ * heard from an oscillator the key tone off the dial on that side: a station on the dial sounds at the key tone */
+int radio_cw_tone_dir(radio_mode_t mode);
 
 /* The board's switches on the base's pins */
 void radio_wifi_power(bool on);

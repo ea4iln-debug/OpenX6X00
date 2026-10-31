@@ -621,25 +621,30 @@ static void update_middle_line(void) {
     int32_t low = subject_i_get((SubjectInt*)cfg_cur_filter_low);
     int32_t high = subject_i_get((SubjectInt*)cfg_cur_filter_high);
     int32_t tone = param_i_get(cfg_key_tone);
+    radio_mode_t mode = subject_i_get((SubjectInt*)cfg_cur_mode);
     int32_t from, to;
 
-    switch ((radio_mode_t) subject_i_get((SubjectInt*)cfg_cur_mode)) {
+    switch (mode) {
         case radio_mode_lsb:
         case radio_mode_lsb_dig:
             from = -high;
             to = -low;
             break;
         /* CW and CWR: the edges are tones, and the signal heard at the key tone is on the line, so
-         * the band is around the line in both, as the spectrum draws it from its LO marker (#34: it
+         * the band is around the line in both, as the spectrum draws it from its CW oscillator (#34: it
          * was beside it, a pitch off, above in CW and below in CWR). From the key tone, not from the
-         * LO offset that places the rows: the X6200's offset is still to be checked on the radio */
+         * LO offset that places the rows (the X6200's is 0: its spectrum is centred on the dial). Where
+         * the tone rises as the dial goes up (CW-R; CW too on the X6200, #115) it is heard below an
+         * oscillator the key tone above the dial: a low edge at 0 leaves the band off centre that way */
         case radio_mode_cw:
-            from = low - tone;
-            to = high - tone;
-            break;
         case radio_mode_cwr:
-            from = tone - high;
-            to = tone - low;
+            if (radio_cw_tone_dir(mode) > 0) {
+                from = tone - high;
+                to = tone - low;
+            } else {
+                from = low - tone;
+                to = high - tone;
+            }
             break;
         case radio_mode_am:
         case radio_mode_nfm:
