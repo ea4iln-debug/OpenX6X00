@@ -1811,9 +1811,18 @@ frequency and the receiver state. Leaving the app gives the VFO back.
   proposed mode and frequency. Distress rows are red, with the position and
   the time it was valid. A `?` marks a call whose error check failed. Save
   (page 2) writes the calls to the Files page.
-- WeFax: DWD, Northwood and Athens stations. View (page 2) chooses Big
-  (default), Full (the whole fax) or Small, the old low panel that keeps the
-  main waterfall visible above it.
+- WeFax: the DWD (Germany), Northwood (UK) and Athens (Greece) stations and
+  NOAA's Boston, New Orleans, Pt. Reyes, Kodiak and Honolulu (US). Your own
+  stations come after them, under Channels: every [channel](#channels) whose
+  name starts with WEFAX (upper or lower case). The list and the header show
+  the rest of its name. A channel holds the dial, and the app listens 1.5 kHz
+  above it: for a station on 7795.0 kHz, tune 7793.5 kHz USB on the main
+  screen (not in the app: it gives the VFO back when it closes), APP >
+  Channels > Add, then Edit for the name (WEFAX JMH); or on the web
+  configurator's Memories page, frequency 7.7935. A channel on one of the
+  stations above (the WEFAX channels a new radio starts with) is not listed
+  twice. View (page 2) chooses Big (default), Full (the whole fax) or Small,
+  the old low panel that keeps the main waterfall visible above it.
 - SSTV: calling frequencies, LSB on 80 and 40 m (3.735, 3.845, 7.165,
   7.171 MHz) and USB above (14.230, 14.233, 18.160, 21.340, 24.975, 28.680,
   50.510 MHz). The picture is on the left, the decoder state on the right,
@@ -2759,6 +2768,10 @@ APP Channels, or the V/M key of the hand mic.
 - Up to 100 channels. They are the same as on the web configurator's Memories
   page; a change made there shows on the radio within a few seconds, unless
   the window is open.
+- A channel whose name starts with WEFAX also shows in the WeFax app's Freq.
+  list ([SSTV, WeFax and NavTex](#sstv-wefax-and-navtex)). Its frequency is
+  the dial, 1.5 kHz below the fax station's: 7793.5 kHz for a station on
+  7795.0 kHz.
 - The first list has NAVTEX MF and HF, SHANNON VOLMET, the DWD RTTY stations
   and the DWD and GYA WeFax stations.
 

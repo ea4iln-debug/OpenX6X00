@@ -23,6 +23,7 @@
 #include "radio.h"
 #include "gui_events.h"
 #include "app_frame.h"
+#include "channel_list.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -33,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -225,6 +227,73 @@ static const freq_list_item_t stations[] = {
 };
 
 #define STATIONS_N  ((int)(sizeof(stations) / sizeof(stations[0])))
+
+/* A frequency this close to a station is that station, in the list and in the header (the channel
+ * list's WEFAX DWD DDK3 is 30 Hz off) */
+#define SAME_STATION_HZ 50
+
+/* What Freq. lists and the header names: the stations, then under a row of their own the
+ * channels whose name starts with WEFAX (APP > Channels, the web Memories page). A channel
+ * holds the dial, so its station is the dial + the audio centre; one at a station's frequency
+ * (the WEFAX channels a new radio starts with) is that station and is not listed twice. */
+static freq_list_item_t freqs[STATIONS_N + 1 + CHANNELS_MAX];
+static char             freq_names[CHANNELS_MAX][CHANNEL_NAME_MAX];
+static int              freqs_n;
+
+/* The entry nearest to freq_hz (a station frequency) within SAME_STATION_HZ, NULL for none */
+static const freq_list_item_t *entry_at(const freq_list_item_t *list, int n, int32_t freq_hz)
+{
+    const freq_list_item_t *best = NULL;
+
+    for (int i = 0; i < n; i++)
+        if (!list[i].group && abs(list[i].freq_hz - freq_hz) <= SAME_STATION_HZ &&
+            (!best || abs(list[i].freq_hz - freq_hz) < abs(best->freq_hz - freq_hz)))
+            best = &list[i];
+    return best;
+}
+
+/* A channel's name as listed: what follows WEFAX (all of it when nothing does), no '#' (it
+ * would break the header's colours) */
+static void channel_name(char *out, size_t size, const char *name)
+{
+    const char *p = name + 5;
+    size_t      o = 0;
+
+    while (*p == ' ' || *p == '-' || *p == '_' || *p == ':' || *p == '.' || *p == '/')
+        p++;
+    if (!*p)
+        p = name;
+    for (; *p && o + 1 < size; p++)
+        if (*p != '#')
+            out[o++] = *p;
+    out[o] = '\0';
+}
+
+static void freqs_build(void)
+{
+    int named = 0;
+
+    memcpy(freqs, stations, sizeof(stations));
+    freqs_n = STATIONS_N;
+
+    channels_reload_if_changed();       /* one added on the web a moment ago */
+    for (uint16_t i = 0; i < channels_count(); i++) {
+        const channel_t *c = channels_get(i);
+
+        if (strncasecmp(c->name, "WEFAX", 5) || c->freq > INT32_MAX - WEFAX_CENTER_HZ)
+            continue;
+
+        int32_t f = (int32_t)c->freq + WEFAX_CENTER_HZ;     /* USB */
+
+        if (entry_at(stations, STATIONS_N, f))
+            continue;
+        if (!named)
+            freqs[freqs_n++] = (freq_list_item_t){.group = "Channels"};
+        channel_name(freq_names[named], sizeof(freq_names[named]), c->name);
+        freqs[freqs_n++] = (freq_list_item_t){.freq_hz = f, .name = freq_names[named]};
+        named++;
+    }
+}
 
 static bool auto_mode(void)
 {
@@ -724,14 +793,11 @@ static void tx_poll(void)
 /* Station and frequency on the left, receiver state on the right */
 static void header_update(void)
 {
-    char        l[64], r[48];
-    int32_t     f    = cparam_i_get(cfg_fg_freq) + WEFAX_CENTER_HZ;     /* USB */
-    const char *name = "WeFax";
+    char                    l[64], r[48];
+    int32_t                 f  = cparam_i_get(cfg_fg_freq) + WEFAX_CENTER_HZ;     /* USB */
+    const freq_list_item_t *at = entry_at(freqs, freqs_n, f);
 
-    for (int i = 0; i < STATIONS_N; i++)
-        if (!stations[i].group && stations[i].freq_hz == f)
-            name = stations[i].name;
-    snprintf(l, sizeof(l), "%s   %.1f kHz", name, f / 1000.0);
+    snprintf(l, sizeof(l), "%s   %.1f kHz", at ? at->name : "WeFax", f / 1000.0);
     if (tx_running)
         snprintf(r, sizeof(r), "#%06x TX %i%%#", theme_hex(TC_tx), tx_progress / 10);
     else
@@ -890,6 +956,7 @@ static void app_open(lv_obj_t *parent)
     align_on       = false;
     gen_seen       = 0;
     fax_on         = false;
+    freqs_build();                      /* the header names a channel from the start */
 
     decoder = wefax_decoder_create();
     if (!decoder) {
@@ -1485,10 +1552,12 @@ static void close_cb(button_data_t *data)
 static void freq_cb(button_data_t *data)
 {
     (void)data;
-    if (freq_list_is_open())
+    if (freq_list_is_open()) {
         freq_list_close();
-    else
-        freq_list_open(app_parent, "WEFAX - stations", stations, STATIONS_N, WEFAX_CENTER_HZ, NULL);
+    } else {
+        freqs_build();      /* the list keeps pointers into freqs while it is open */
+        freq_list_open(app_parent, "WEFAX - stations", freqs, freqs_n, WEFAX_CENTER_HZ, NULL);
+    }
 }
 
 /* Cont: rows at once (tuned in during a fax) */
