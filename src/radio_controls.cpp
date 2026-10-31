@@ -380,11 +380,13 @@ void controls_span_narrower(button_data_t *data) {
     cfg_sm.p_mode_zoom.set(cfg_sm.p_mode_zoom.get() << 1);
 }
 
-/* CW ZAP: tune so that the signal the decoder hears sits on the key tone, to 10 Hz */
+/* CW ZAP: tune so that the signal the decoder hears sits on the key tone, to 10 Hz. A tone above the key tone
+ * is a station above the dial where the tone falls as the dial goes up (CW on the X6100), below it where the
+ * tone rises (CW-R; CW on the X6200 too, where ZAP went the wrong way, #115) */
 void controls_cw_zap(button_data_t *data) {
-    int32_t mode = cfg_sm.cp_cur_mode.get();
+    int dir = radio_cw_tone_dir((radio_mode_t)cfg_sm.cp_cur_mode.get());
 
-    if (mode != radio_mode_cw && mode != radio_mode_cwr) {
+    if (!dir) {
         return;
     }
 
@@ -393,7 +395,7 @@ void controls_cw_zap(button_data_t *data) {
     int32_t freq      = cfg_sm.cp_fg_freq.get();
 
     LV_LOG_USER("tone_freq: %f, key_tone: %i", tone_freq, key_tone);
-    if (mode == radio_mode_cw) {
+    if (dir < 0) {
         freq += tone_freq - key_tone;
     } else {
         freq -= tone_freq - key_tone;
