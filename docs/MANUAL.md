@@ -17,7 +17,7 @@ Settings. Button and option names are written as the radio shows them.
 - [Digital modes](#digital-modes): [opening a mode](#opening-a-mode), [FT8 and FT4](#ft8-and-ft4), [JS8](#js8), [WSPR](#wspr), [SSTV, WeFax and NavTex](#sstv-wefax-and-navtex), [PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia), [JTTY](#jtty), [text log of the keyboard modes](#text-log-of-the-keyboard-modes), [RTTY and WeFax TX](#rtty-and-wefax-tx)
 - [CW](#cw): [CW decoder](#cw-decoder), [CW from the keyboard](#cw-from-the-keyboard), [CW Keyboard](#cw-keyboard), [USB paddle](#usb-paddle), [CW messages](#cw-messages) ([beacon](#cw-beacon), [QRSS3](#qrss3)), [CW Trainer](#cw-trainer)
 - [Apps](#apps): [DX Cluster](#dx-cluster), [Field Ops (SOTA / POTA)](#field-ops-sota--pota), [Bands](#bands), [Channels](#channels)
-- [Bluetooth](#bluetooth): [headphones](#bluetooth-headphones), [CAT](#bluetooth-cat)
+- [Bluetooth](#bluetooth): [headphones](#bluetooth-headphones), [CAT](#bluetooth-cat), [a PC on Bluetooth](#a-pc-on-bluetooth)
 - [Themes](#themes)
 - [Web configurator](#web-configurator)
 - [Wavelog](#wavelog)
@@ -1021,7 +1021,7 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
   it the device has to be paired again.
 - One pair of headphones at a time: connecting one disconnects the others. A
   keyboard and a CAT phone stay connected.
-- Details: [Bluetooth headphones](#bluetooth-headphones), [Bluetooth CAT](#bluetooth-cat).
+- Details: [Bluetooth headphones](#bluetooth-headphones), [Bluetooth CAT](#bluetooth-cat), [a PC on Bluetooth](#a-pc-on-bluetooth).
 
 ### Keys tab
 
@@ -2802,7 +2802,7 @@ pairing and connection in DEVICES, the audio switches in HEADPHONES.
 | Volume | the headphones sink volume |
 | Mute speaker | AF volume and TX monitor 0 while the headphones are connected, back to the previous values when they disconnect. The AF volume does not change the audio sent to the headphones. |
 
-- Only A2DP is used: HFP/HSP (SCO) gives no audio on this radio and drops the
+- Only A2DP is used: HFP/HSP (SCO) gives no audio on the X6100 and drops the
   WiFi, so PulseAudio has no headset backend
   (`rootfs/etc/pulse/system.pa.d/btaudio.pa`). The same file stops PulseAudio
   from looping a phone or tablet that connects for CAT (it also appears as an
@@ -2852,6 +2852,26 @@ On Linux: `rfcomm connect /dev/rfcomm0
 <BT-MAC> 1`, then use `/dev/rfcomm0`. On Windows and Android the paired
 device exposes an outgoing COM/SPP port. Log files: `/tmp/btcat.log`,
 `/tmp/btcat-setup.log`. Connection details: [reference](#bluetooth-cat-connection).
+
+### A PC on Bluetooth
+
+When a PC (or a phone) pairs with the radio it gets:
+
+- CAT, over the radio's Bluetooth serial port ([Bluetooth CAT](#bluetooth-cat)).
+- An audio output: the radio as a Bluetooth speaker (A2DP). It plays
+  nowhere, on purpose: the radio drops what is sent to it, so the sound of a
+  PC or a phone can't end up in the TX audio (see
+  [Bluetooth headphones](#bluetooth-headphones)). If the PC made the radio
+  its speaker, pick the PC's own speaker again.
+- No audio input. A PC makes a Bluetooth microphone from the headset profile
+  (HFP/HSP), and the radio does not offer it: on the X6100's WiFi/Bluetooth
+  chip, SCO (the link the headset audio goes over) gives no audio and drops
+  the WiFi.
+
+For a program on the PC, use the USB cable (the radio's USB sound card and
+CAT; the CAT settings are in the [reference](#bluetooth-cat-connection)) or
+the [TCI server](#tci-server): CAT and audio both ways over the network, on
+WiFi or better on [Ethernet](#ethernet).
 
 ## Themes
 
@@ -4694,8 +4714,14 @@ certificate once, or use "Convert on radio".
 
 #### A Bluetooth headset gives no audio for the microphone
 
-Only A2DP (listening) is used: HFP/HSP gives no audio on this radio and drops
+Only A2DP (listening) is used: HFP/HSP gives no audio on the X6100 and drops
 the WiFi.
+
+#### A PC on Bluetooth has an audio output but no input
+
+That is how the radio is set up: the output plays nowhere, and there is no
+Bluetooth audio input. See [A PC on Bluetooth](#a-pc-on-bluetooth): a
+program on the PC takes its audio from the USB cable or [TCI](#tci-server).
 
 #### The new font did not change anything
 
