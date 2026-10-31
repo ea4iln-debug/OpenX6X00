@@ -48,9 +48,42 @@ static int              est_min = -1;
 static bool             est_approx;
 static bool             est_ext;        /* the estimate was made on external power */
 static bool             no_battery;     /* the base found no battery */
+static lv_coord_t       power_col = 4;  /* the power row's gaps: after each sign, and more before the supply's */
+static lv_coord_t       power_half = 4; /* (power_gaps) */
 
 static void check_time_sync_cb(lv_timer_t * t);
 static time_t get_last_sync_time();
+
+/* % + V on a supply is the widest choice: "100%" with both signs and the supply's voltage is wider than the
+ * box with the wider fonts (DejaVu, the default, and Sony in VISION's box). Then the gaps narrow, the one
+ * between the two halves last: 4 px after each sign and 4 more before the supply's when there is room, else
+ * 2 or 1 after each sign and what is left (up to 4) before the supply's. The usual gaps in the other choices */
+static void power_gaps(bool fit) {
+    lv_obj_t  *row  = lv_obj_get_parent(power_labels[0]);
+    lv_obj_t  *box  = lv_obj_get_parent(row);
+    lv_coord_t col  = 4, half = 4;
+
+    if (fit) {
+        /* the box's width inside its border, 2 px clear of each side, less the labels */
+        lv_coord_t room = lv_obj_get_style_width(box, 0) - 2 * lv_obj_get_style_border_width(box, 0) - 4;
+
+        for (int i = 0; i < 4; i++) {
+            const char *t = lv_label_get_text(power_labels[i]);
+
+            room -= lv_txt_get_width(t, strlen(t), lv_obj_get_style_text_font(power_labels[i], 0), 0, LV_TEXT_FLAG_NONE);
+        }
+        if (room < 3 * col + half) {
+            col  = room >= 3 * 2 + 4 ? 2 : 1;
+            half = LV_CLAMP(0, room - 3 * col, 4);
+        }
+    }
+    if (col != power_col || half != power_half) {
+        power_col  = col;
+        power_half = half;
+        lv_obj_set_style_pad_column(row, col, 0);
+        lv_obj_set_style_pad_left(power_labels[2], half, 0);
+    }
+}
 
 /* Time on top (seconds smaller), voltages below, both always shown. */
 static void show_time() {
@@ -65,6 +98,8 @@ static void show_time() {
 
     int  show = param_i_get(cfg_power_display);
     bool volts = show == 1 || (show == 2 && now / POWER_TURN_S % 2);   /* else the % and the time */
+    bool pct_v = show == 3;     /* % + V: the %, and on a supply the supply's voltage in place of the time */
+    bool fit   = false;         /* % + V on a supply: the gaps fitted to the box (power_gaps) */
 
     pthread_mutex_lock(&power_mux);
     const char * bat_sym;
@@ -88,8 +123,9 @@ static void show_time() {
             break;
     }
 
-    /* The % and the time left or to full (bat_est.c), the voltages, or the two in turn: Settings > Display >
-     * MAIN SCREEN > Power display. Without a battery the supply's voltage, whatever it says */
+    /* The % and the time left or to full (bat_est.c), the voltages, the two in turn, or the % and the
+     * supply's voltage: Settings > Display > MAIN SCREEN > Power display. Without a battery the supply's
+     * voltage, whatever it says */
     if (v_bat < 3.0f && v_ext < 3.0f) {    /* no reading yet: radio.c gives the first some seconds after start */
         for (int i = 0; i < 4; i++)
             lv_label_set_text(power_labels[i], "");
@@ -130,6 +166,14 @@ static void show_time() {
             } else {
                 lv_label_set_text(power_labels[3], "");
             }
+        } else if (pct_v && ext) {
+            /* % + V on a supply (#119): the battery's level and %, then the supply's sign and its voltage
+             * as Volts has them. No time to full: no room for it. On battery as % + time, below */
+            lv_label_set_text(power_labels[0], bat_sym);
+            lv_label_set_text_fmt(power_labels[1], "%i%%", cap_bat);
+            lv_label_set_text(power_labels[2], chg ? LV_SYMBOL_CHARGE : SYMBOL_PLUG);
+            lv_label_set_text_fmt(power_labels[3], "%.1fv", v_ext);
+            fit = true;
         } else {
             lv_label_set_text(power_labels[0], !ext ? bat_sym : chg ? LV_SYMBOL_CHARGE : SYMBOL_PLUG);
             lv_label_set_text_fmt(power_labels[1], "%i%%", cap_bat);
@@ -148,6 +192,7 @@ static void show_time() {
             lv_obj_set_style_text_color(power_labels[i], low ? TC(tx)
                                         : (theme_shape.deck && i % 2) ? TC(text_mute) : TC(text_soft), 0);
     }
+    power_gaps(fit);
 
     pthread_mutex_unlock(&power_mux);
 }
@@ -191,6 +236,8 @@ lv_obj_t * clock_init(lv_obj_t * parent) {
         lv_obj_set_style_text_color(power_labels[i], TC(text_soft), 0);
     }
     lv_obj_set_style_pad_left(power_labels[2], 4, 0);
+    power_col  = 4;             /* new labels (a theme change): the usual gaps */
+    power_half = 4;
     if (theme_shape.vision) {   /* VISION: the time only here, the battery in a box of its own at the right end of the S-meter's row */
         lv_obj_t *box = lv_obj_create(parent);
 

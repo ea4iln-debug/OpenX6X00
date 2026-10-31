@@ -374,7 +374,8 @@ them.
 > learns it by itself from how you use it, and it gets more precise over time.
 > A "~" in front of the time means it is still learning.
 
-At the top right the radio shows the charge and the time left:
+At the top right the radio shows the charge and the time left (with Power
+display at % + time, the default; the other choices are below):
 - On battery: "45%  2h07", that is 45% of charge and about 2 hours and 7
   minutes before the battery is empty, if you keep using the radio the way you
   are using it now. While the radio is still learning, the time has a "~" in
@@ -394,12 +395,16 @@ At the top right the radio shows the charge and the time left:
   readings settle (see [low battery](#low-battery)).
 
 Power display. Where: Settings > Display > MAIN SCREEN (also on the web
-configurator's Display page). What the box shows (issue #108):
+configurator's Display page). What the box shows (issues #108 and #119):
 - % + time (the default): the charge and the time, as above.
 - Volts: the battery's level sign and its voltage, "7.9v"; on the external
   supply also the lightning sign (charging) or the plug, and the supply's
   voltage: "7.9v  13.8v".
 - Alternate: the two in turn, 5 seconds each.
+- % + V: on the external supply the battery's level sign and the charge,
+  then the lightning sign (charging) or the plug and the supply's voltage:
+  "85%  13.6v". The time to full is not shown in this choice. On battery
+  alone the same as % + time: "45%  2h07".
 
 On battery when low the voltage turns red, as the % does. With no battery
 fitted the box shows the supply's voltage whatever the choice.
@@ -478,7 +483,8 @@ yet, in colour when working:
 | DX | green DX cluster connected; grey connecting or retrying; dark stopped |
 
 In the middle is the [S-meter](#s-meter). On the right: the local time and the
-charge with the time left, or the voltages (see [battery time](#battery-time)).
+charge with the time left, the voltages, or the charge with the supply's
+voltage (see [battery time](#battery-time)).
 
 ### S-meter
 
@@ -836,7 +842,7 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
 | BACKLIGHT | timeout and brightness, buttons brightness (Always Off, Always On, Temporarily On), Screen off (min) (minutes without a key or knob, 0 never; the key that wakes it does nothing else), Screen always off (the screen stays dark for a radio run from the VFO-Knob or a browser; POWER shows it for the blank time, a minute at least) |
 | SPECTRUM | Spectrum; with it on Fill, Peaks, Fill gradient, Filter colour, Height (see [Waterfall](#waterfall)) |
 | WATERFALL | see [Waterfall](#waterfall) |
-| MAIN SCREEN | Band plan, Cluster spots, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate; see [battery time](#battery-time)) |
+| MAIN SCREEN | Band plan, Cluster spots, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)) |
 | INTERFACE | Popups Freq/Info/ALC, Icon menus, Knob info, Theme, Font, Decoder text, FT8/FT4 info |
 
 - Popups Freq/Info/ALC: a big frequency while tuning, a big value of the
@@ -3028,7 +3034,7 @@ applied on the radio as you change them.
 | On the waterfall | Band plan, Plan (Auto or a plan, with what Auto takes and from what; see [Band plan](#band-plan)), Cluster spots, Cluster column |
 | Backlight | Brightness, Brightness when idle, Idle after (5-120 s), Button lights (Always off, Always on, Temporarily on), Screen off after (0-120 min), Screen always off |
 | Receiver | the X6200 only: WR12 on HOST (see [WR12 receiver](#wr12-receiver-x6200)) |
-| Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate; see [battery time](#battery-time)), Icon menus, Knob info, Decoder text (Large, Compact), Magnify frequency, Magnify info, Magnify ALC |
+| Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), Icon menus, Knob info, Decoder text (Large, Compact), Magnify frequency, Magnify info, Magnify ALC |
 | Boot picture | the picture the radio starts with, Upload, Default; kept by the web server, not a Settings option, so it works with the radio's screen down too (see [Boot picture](#boot-picture)) |
 
 HTTPS. The server also listens on port 443, with a self-signed certificate

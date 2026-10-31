@@ -454,8 +454,9 @@ class SettingsManager {
     Parameter<float, int32_t, 10> p_cessb_power_up{"cessb_power_up", 3.7f, {},
         StorageType::GLOBAL, pending_writes_, {}, &global_params_};
     // Power display (Settings > Display > MAIN SCREEN, live): the box at the top right shows 0 the charge with the
-    // time left or to full, 1 the voltages (the battery's, and the supply's when one is in), 2 the two in turn (clock.c)
-    Parameter<int32_t> p_power_display{"power_display", 0, 0, 2,
+    // time left or to full, 1 the voltages (the battery's, and the supply's when one is in), 2 the two in turn, 3 the
+    // charge and, on a supply, the supply's voltage, on battery as 0 (#119) (clock.c)
+    Parameter<int32_t> p_power_display{"power_display", 0, 0, 3,
         StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // Text log of the keyboard modes (digi_textlog.c, #55): on by default, and the most the folder keeps, MB
