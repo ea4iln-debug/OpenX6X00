@@ -315,3 +315,8 @@ bool hw_flow_read(hw_pack_t *p) {
 void hw_flow_restart(void) {
     next_pack_ns = 0;
 }
+
+/* No WR12 but on the X6200 */
+int hw_wr12_state(void) {
+    return 0;
+}

@@ -23,6 +23,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -125,6 +126,8 @@ bool x6200_control_cmd(x6200_cmd_enum_t cmd, uint32_t arg) {
     return ok;
 }
 
+static void wr12_start(void);
+
 /* ---- Init ----------------------------------------------------------------------------- */
 
 bool hw_init(void) {
@@ -135,6 +138,7 @@ bool hw_init(void) {
     if (!x6200_flow_init()) {
         return false;
     }
+    wr12_start();
     pack = malloc(sizeof(x6200_flow_t));
     return pack != NULL;
 }
@@ -341,14 +345,18 @@ bool hw_set_f(hw_param_t p, float v) {
 
 /* ---- The WR12, Xiegu's 54 MHz-1 GHz receiver on HOST ------------------------------------ */
 
-/* As the stock app does it (MainWidget::updateVfoFrequency, XWBReceiverComm::start): with the WR12 on and the
- * current VFO at 54 MHz-1 GHz, the WR12 is tuned over its USB serial port and its bypass is off, bit 23 of
- * register 12 (the stock app's "iqswap") is set, and the base is tuned to the WR12's output, 5.06 MHz (the stock
- * app's BaseCommIIC::parseParamItem sends any VFO above 54 MHz as 5060000 while a WR12 is there). Below 54 MHz:
- * iqswap off, the WR12's bypass on, the base tuned as ever.
+/* As the stock app does it (XWBReceiverComm::start, MainWidget::updateVfoFrequency):
+ * - found on USB by itself (a thread looks each second): taken from gpsd, which opens any ttyACM as a GPS, asked
+ *   AT+AYT, and set up as the stock app does (AT+INIT, the LNA at 15, IF and mixer gains at 0, both AGCs on, bypass
+ *   on). hw_wr12_state() tells the GUI, which shows WR12 and switches Settings > General > WR12 on HOST with it.
+ * - with it there, on and the current VFO at 54 MHz-1 GHz: the WR12 tuned over its port, its bypass off, bit 23 of
+ *   register 12 (the stock app's "iqswap") set, and the base tuned to the WR12's output, 5.06 MHz (the stock
+ *   app's BaseCommIIC::parseParamItem sends any VFO above 54 MHz as 5060000 while a WR12 is there). Below 54 MHz:
+ *   iqswap off, the WR12's bypass on, the base tuned as ever.
  * The port stays open, and the frequency goes from a thread of its own, the latest one only: a knob turned fast
  * would otherwise hold the radio's lock through one write per step, and the waterfall lagged. */
-#define WR12_TTY        "/dev/ttyACM0"
+#define WR12_VID        "0483"      /* STMicroelectronics */
+#define WR12_PID        "5740"      /* Virtual COM Port */
 #define WR12_MIN_HZ     54000000
 #define WR12_MAX_HZ     1000000000
 #define WR12_IF_HZ      5060000     /* where the WR12 puts what it receives: the base listens there */
@@ -357,11 +365,21 @@ bool hw_set_f(hw_param_t p, float v) {
 
 static pthread_mutex_t wr12_io = PTHREAD_MUTEX_INITIALIZER;    /* the port, and the frequency waiting */
 static pthread_cond_t  wr12_cv = PTHREAD_COND_INITIALIZER;
+static char            wr12_path[24];   /* /dev/ttyACMn it was found on */
 static int             wr12_fd = -1;
-static bool            wr12_ready;      /* AT+INIT and the gains sent since the port was last opened */
+static volatile int    wr12_state = -1; /* hw_wr12_state() */
+static bool            wr12_ready;      /* set up since it was last found */
 static bool            wr12_active;     /* listening through it: iqswap set, bypass off */
 static int32_t         wr12_hz;         /* the frequency last asked of it */
 static int32_t         wr12_want;       /* a frequency for the thread to send, 0 none */
+
+/* Under wr12_io */
+static void wr12_close(void) {
+    if (wr12_fd >= 0) {
+        close(wr12_fd);
+        wr12_fd = -1;
+    }
+}
 
 /* Under wr12_io */
 static bool wr12_write(const char *cmd, bool log) {
@@ -369,29 +387,49 @@ static bool wr12_write(const char *cmd, bool log) {
     int  n = snprintf(buf, sizeof(buf), "%s\r\n", cmd);
     bool ok;
 
-    if (wr12_fd < 0) {
+    if (wr12_fd < 0 && wr12_path[0]) {
         struct termios t;
 
-        wr12_fd = open(WR12_TTY, O_RDWR | O_NOCTTY | O_NONBLOCK);
-        if (wr12_fd < 0) {
-            return false;
-        }
-        if (tcgetattr(wr12_fd, &t) == 0) {
+        wr12_fd = open(wr12_path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+        if (wr12_fd >= 0 && tcgetattr(wr12_fd, &t) == 0) {
             cfmakeraw(&t);
             tcsetattr(wr12_fd, TCSANOW, &t);
         }
-        wr12_ready = false;
     }
-    ok = write(wr12_fd, buf, n) == n;
+    ok = wr12_fd >= 0 && write(wr12_fd, buf, n) == n;
     if (!ok) {
-        close(wr12_fd);         /* unplugged: opened again, and set up again, on the next write */
-        wr12_fd = -1;
-        wr12_ready = false;
+        wr12_close();
     }
     if (log || !ok) {
         fprintf(stderr, "hw_x6200: WR12 %s%s\n", cmd, ok ? "" : " (not sent)");
     }
     return ok;
+}
+
+/* Under wr12_io: `cmd` sent and OK back within half a second */
+static bool wr12_ask(const char *cmd) {
+    char   buf[96];
+    size_t n = 0;
+
+    if (wr12_fd >= 0) {
+        tcflush(wr12_fd, TCIFLUSH);
+    }
+    if (!wr12_write(cmd, true)) {
+        return false;
+    }
+    for (int i = 0; i < 10 && n < sizeof(buf) - 1; i++) {
+        struct pollfd p = {wr12_fd, POLLIN, 0};
+        ssize_t       r;
+
+        if (poll(&p, 1, 50) > 0 && (r = read(wr12_fd, buf + n, sizeof(buf) - 1 - n)) > 0) {
+            n += r;
+            buf[n] = '\0';
+            if (strstr(buf, "OK")) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 static bool wr12_at(const char *cmd) {
@@ -414,7 +452,77 @@ static void wr12_init(void) {
         }
         usleep(50000);
     }
+    wr12_hz = 0;        /* the frequency again on the next tune */
     wr12_ready = true;
+}
+
+/* The ttyACM whose USB device is the WR12's, in `path` */
+static bool wr12_find(char *path, size_t size) {
+    for (int i = 0; i < 4; i++) {
+        char  f[64], vid[8] = "", pid[8] = "";
+        FILE *fp;
+
+        snprintf(f, sizeof(f), "/sys/class/tty/ttyACM%d/device/../idVendor", i);
+        if ((fp = fopen(f, "r"))) {
+            if (!fgets(vid, sizeof(vid), fp)) vid[0] = '\0';
+            fclose(fp);
+        }
+        snprintf(f, sizeof(f), "/sys/class/tty/ttyACM%d/device/../idProduct", i);
+        if ((fp = fopen(f, "r"))) {
+            if (!fgets(pid, sizeof(pid), fp)) pid[0] = '\0';
+            fclose(fp);
+        }
+        if (!strncmp(vid, WR12_VID, 4) && !strncmp(pid, WR12_PID, 4)) {
+            snprintf(path, size, "/dev/ttyACM%d", i);
+            return true;
+        }
+    }
+    return false;
+}
+
+static void *wr12_watch(void *arg) {
+    (void)arg;
+    for (;;) {
+        char path[24];
+        bool found = wr12_find(path, sizeof(path));
+
+        if (found && wr12_state != 1) {
+            char cmd[64];
+            bool ok;
+
+            snprintf(cmd, sizeof(cmd), "gpsdctl remove %s > /dev/null 2>&1", path);
+            if (system(cmd) != 0) {
+                /* no gpsd, or it did not have it */
+            }
+            pthread_mutex_lock(&wr12_io);
+            wr12_close();
+            snprintf(wr12_path, sizeof(wr12_path), "%s", path);
+            ok = wr12_ask("AT+AYT");
+            pthread_mutex_unlock(&wr12_io);
+            if (ok) {
+                wr12_init();
+                wr12_at(wr12_active ? "AT+BYPASS=0" : "AT+BYPASS=1");
+                fprintf(stderr, "hw_x6200: WR12 found on %s\n", path);
+            }
+            wr12_state = ok;
+        } else if (!found && wr12_state != 0) {
+            pthread_mutex_lock(&wr12_io);
+            wr12_close();
+            wr12_path[0] = '\0';
+            pthread_mutex_unlock(&wr12_io);
+            wr12_ready = false;
+            if (wr12_state == 1) {
+                fprintf(stderr, "hw_x6200: WR12 gone\n");
+            }
+            wr12_state = 0;
+        }
+        sleep(1);
+    }
+    return NULL;
+}
+
+int hw_wr12_state(void) {
+    return wr12_state;
 }
 
 static void *wr12_thread(void *arg) {
@@ -436,17 +544,18 @@ static void *wr12_thread(void *arg) {
     return NULL;
 }
 
-static void wr12_tune(int32_t hz) {
-    static bool started;
+static void wr12_start(void) {
+    pthread_t t;
 
-    if (!started) {
-        pthread_t t;
-
-        started = pthread_create(&t, NULL, wr12_thread, NULL) == 0;
-        if (started) {
-            pthread_detach(t);
-        }
+    if (pthread_create(&t, NULL, wr12_watch, NULL) == 0) {
+        pthread_detach(t);
     }
+    if (pthread_create(&t, NULL, wr12_thread, NULL) == 0) {
+        pthread_detach(t);
+    }
+}
+
+static void wr12_tune(int32_t hz) {
     pthread_mutex_lock(&wr12_io);
     wr12_want = hz;
     pthread_cond_signal(&wr12_cv);
@@ -466,7 +575,7 @@ static void iqswap_set(bool on) {
 
 /* True when the WR12 takes `hz`: the base is then tuned to WR12_IF_HZ. Only the current VFO drives the WR12. */
 static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
-    bool through = param_i_get(cfg_wr12) && hz >= WR12_MIN_HZ && hz <= WR12_MAX_HZ;
+    bool through = wr12_state == 1 && param_i_get(cfg_wr12) && hz >= WR12_MIN_HZ && hz <= WR12_MAX_HZ;
 
     if (vfo != (radio_vfo_t)param_i_get(cfg_band_current_vfo)) {
         return through;
@@ -474,7 +583,6 @@ static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
     if (through) {
         if (!wr12_ready) {
             wr12_init();
-            wr12_hz = 0;
         }
         if (hz != wr12_hz) {
             wr12_tune(hz);

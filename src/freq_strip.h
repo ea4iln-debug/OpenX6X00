@@ -16,6 +16,7 @@ extern "C" {
 #endif
 
 lv_obj_t *freq_strip_init(lv_obj_t *parent);
+void freq_strip_set_wr12(bool on);
 
 /* Shows text instead of the band while the VFO stays on freq_hz. */
 void      freq_strip_set_label(const char *text, int32_t freq_hz);

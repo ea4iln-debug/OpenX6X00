@@ -67,6 +67,7 @@
 #include "wefax_window.h"
 #include "dialog_js8.h"
 #include "freq_strip.h"
+#include "hw/hw.h"
 #include "freq_scale.h"
 #include "spot_marks.h"
 #include "band_plan.h"
@@ -1512,6 +1513,21 @@ static void on_spectrum_layout_change(Subject *subj, void *user_data) {
     panel_keep_below(wf_y - 8);
 }
 
+/* The X6200's WR12 plugged in or out (hw_x6200.c looks each second): WR12 by the frequency, and Settings >
+ * General > WR12 on HOST switched with it, as the stock app does: its bands come or go (on_wr12_change) */
+static void wr12_poll_cb(lv_timer_t *t) {
+    static int last = -1;
+    int        st = hw_wr12_state();
+
+    if (st < 0 || st == last) return;
+    last = st;
+    freq_strip_set_wr12(st == 1);
+    if (param_i_get(cfg_wr12) != st) {
+        LV_LOG_USER("WR12 %s", st ? "found: on" : "gone: off");
+        param_i_set(cfg_wr12, st);
+    }
+}
+
 static void channels_poll_cb(lv_timer_t *t) {
     dialog_channels_poll();
 }
@@ -1522,6 +1538,7 @@ lv_obj_t * main_screen() {
     broadcast_db_init();      /* SWL list for the GENE key, copied to /mnt the first time */
     channels_load();    /* creates channels.json with the defaults when missing */
     lv_timer_create(channels_poll_cb, 2000, NULL);
+    lv_timer_create(wr12_poll_cb, 1000, NULL);
 
     freq_lock = subject_i_create(false);
     obj = lv_obj_create(NULL);
