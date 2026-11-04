@@ -353,17 +353,18 @@ bool hw_set_f(hw_param_t p, float v) {
  *   register 12 (the stock app's "iqswap") set, and the base tuned to the WR12's output, 5.06 MHz (the stock
  *   app's BaseCommIIC::parseParamItem sends any VFO above 54 MHz as 5060000 while a WR12 is there). Below 54 MHz:
  *   iqswap off, the WR12's bypass on, the base tuned as ever.
- * The port stays open, and the frequency goes from a thread of its own, the latest one only: a knob turned fast
- * would otherwise hold the radio's lock through one write per step, and the waterfall lagged. */
+ * The port stays open and each command waits for its OK, as the stock app's. The frequency goes from a thread of
+ * its own, the latest one only: a knob turned fast held the radio's lock through one write per step, and the
+ * spectrum lagged. */
 #define WR12_VID        "0483"      /* STMicroelectronics */
 #define WR12_PID        "5740"      /* Virtual COM Port */
 #define WR12_MIN_HZ     54000000
 #define WR12_MAX_HZ     1000000000
 #define WR12_IF_HZ      5060000     /* where the WR12 puts what it receives: the base listens there */
-#define WR12_GAP_US     20000       /* between two frequencies to it, at most 50 a second */
-#define X6200_IQSWAP    0x800000
+#define X6200_IQSWAP    0x800000    /* register 12: the stock app's iqswap, set while listening through the WR12 */
 
-static pthread_mutex_t wr12_io = PTHREAD_MUTEX_INITIALIZER;    /* the port, and the frequency waiting */
+static pthread_mutex_t wr12_io = PTHREAD_MUTEX_INITIALIZER;    /* the port */
+static pthread_mutex_t wr12_mx = PTHREAD_MUTEX_INITIALIZER;    /* the frequency waiting: never held over a write */
 static pthread_cond_t  wr12_cv = PTHREAD_COND_INITIALIZER;
 static char            wr12_path[24];   /* /dev/ttyACMn it was found on */
 static int             wr12_fd = -1;
@@ -534,21 +535,25 @@ int hw_wr12_state(void) {
     return wr12_state;
 }
 
+/* Sends the frequency waiting, its OK waited for; one asked meanwhile goes next, the ones between it are skipped */
 static void *wr12_thread(void *arg) {
     (void)arg;
-    pthread_mutex_lock(&wr12_io);
     for (;;) {
-        while (!wr12_want) {
-            pthread_cond_wait(&wr12_cv, &wr12_io);
-        }
-        char cmd[32];
+        char    cmd[32];
+        int32_t hz;
 
-        snprintf(cmd, sizeof(cmd), "AT+FREQ=%d", (int)wr12_want);
+        pthread_mutex_lock(&wr12_mx);
+        while (!wr12_want) {
+            pthread_cond_wait(&wr12_cv, &wr12_mx);
+        }
+        hz = wr12_want;
         wr12_want = 0;
+        pthread_mutex_unlock(&wr12_mx);
+
+        snprintf(cmd, sizeof(cmd), "AT+FREQ=%d", (int)hz);
+        pthread_mutex_lock(&wr12_io);
         wr12_write(cmd, false);
         pthread_mutex_unlock(&wr12_io);
-        usleep(WR12_GAP_US);
-        pthread_mutex_lock(&wr12_io);
     }
     return NULL;
 }
@@ -564,11 +569,12 @@ static void wr12_start(void) {
     }
 }
 
+/* Under the radio's lock: never waits for the WR12 */
 static void wr12_tune(int32_t hz) {
-    pthread_mutex_lock(&wr12_io);
+    pthread_mutex_lock(&wr12_mx);
     wr12_want = hz;
     pthread_cond_signal(&wr12_cv);
-    pthread_mutex_unlock(&wr12_io);
+    pthread_mutex_unlock(&wr12_mx);
     wr12_hz = hz;
 }
 

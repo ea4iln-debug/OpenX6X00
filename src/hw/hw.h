@@ -166,12 +166,14 @@ int32_t hw_get_i(hw_param_t p);
 
 /* The two VFOs. True when the value changed */
 bool hw_vfo_set_freq(radio_vfo_t vfo, int32_t hz);
-/* The X6200's WR12 on HOST: -1 not looked for yet, 0 not there, 1 there (found on USB, answering). 0 elsewhere */
-int hw_wr12_state(void);
 bool hw_vfo_set_mode(radio_vfo_t vfo, radio_mode_t mode);
 void hw_vfo_set_agc(radio_vfo_t vfo, radio_agc_t agc);
 void hw_vfo_set_att(radio_vfo_t vfo, bool on);
 void hw_vfo_set_pre(radio_vfo_t vfo, bool on);
+
+/* The X6200's WR12 on HOST: 1 found on USB and answering, 0 not there, -1 not known (not looked for yet, or a
+ * radio without it): the GUI leaves Settings > General > WR12 on HOST alone then */
+int hw_wr12_state(void);
 
 void hw_poweroff(void);
 /* The whole settings block to the base again; false: it did not get through */

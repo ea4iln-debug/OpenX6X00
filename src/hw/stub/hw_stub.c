@@ -316,7 +316,7 @@ void hw_flow_restart(void) {
     next_pack_ns = 0;
 }
 
-/* No WR12 but on the X6200 */
+/* The WR12 is the X6200's: not known here, Settings > General > WR12 on HOST stays as set */
 int hw_wr12_state(void) {
-    return 0;
+    return -1;
 }

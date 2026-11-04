@@ -55,7 +55,8 @@ int freq_strip_step_char(const char *text, int32_t step, bool *big) {
 static char      app[16];
 static lv_obj_t *strip, *band_label, *freq_label, *mode_label, *qth_dot, *qth_label, *tx_label;
 static lv_obj_t *nr_label, *nb_label, *dnf_label, *rit_label, *xit_label;
-static lv_obj_t *wr12_label;         /* the X6200's WR12 on HOST, found: as the stock app's blue WR12 */
+#define WR12_BLUE        0x1E6FD9      /* the stock app's WR12 sign */
+static lv_obj_t *wr12_label;        /* WR12 while the X6200's WR12 is found, kept over a theme change */
 static bool      wr12_shown;
 static lv_obj_t *freq_small, *other_label, *vfo_badge;   /* deck: the 10 Hz digits, the other VFO, A or B */
 static lv_obj_t *mid, *col;
@@ -480,7 +481,7 @@ lv_obj_t *freq_strip_init(lv_obj_t *parent) {
     lv_obj_set_style_pad_column(top, 3, 0);
     wr12_label = ind_create(top, "WR12");
     lv_obj_set_style_text_color(wr12_label, lv_color_white(), 0);
-    lv_obj_set_style_bg_color(wr12_label, lv_color_hex(0x1E6FD9), 0);
+    lv_obj_set_style_bg_color(wr12_label, lv_color_hex(WR12_BLUE), 0);
     lv_obj_set_style_bg_opa(wr12_label, LV_OPA_COVER, 0);
     freq_strip_set_wr12(wr12_shown);
     nr_label = ind_create(top, "NR");
@@ -599,9 +600,7 @@ void freq_strip_set_offset(int32_t offset_hz) {
     if (strip) update_cb(NULL, NULL);
 }
 
-#endif
-
-/* The X6200's WR12 found on HOST (screen_main.c follows hw_wr12_state()) */
+/* The X6200's WR12 found on HOST, in blue as the stock app's (screen_main.c follows hw_wr12_state()) */
 void freq_strip_set_wr12(bool on) {
     wr12_shown = on;
     if (!wr12_label) return;
@@ -609,3 +608,5 @@ void freq_strip_set_wr12(bool on) {
     else lv_obj_add_flag(wr12_label, LV_OBJ_FLAG_HIDDEN);
     vision_fit();
 }
+
+#endif
