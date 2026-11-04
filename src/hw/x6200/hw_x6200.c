@@ -23,6 +23,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -344,39 +345,61 @@ bool hw_set_f(hw_param_t p, float v) {
  * current VFO at 54 MHz-1 GHz, the WR12 is tuned over its USB serial port and its bypass is off, bit 23 of
  * register 12 (the stock app's "iqswap") is set, and the base is tuned to the WR12's output, 5.06 MHz (the stock
  * app's BaseCommIIC::parseParamItem sends any VFO above 54 MHz as 5060000 while a WR12 is there). Below 54 MHz:
- * iqswap off, the WR12's bypass on, the base tuned as ever. */
+ * iqswap off, the WR12's bypass on, the base tuned as ever.
+ * The port stays open, and the frequency goes from a thread of its own, the latest one only: a knob turned fast
+ * would otherwise hold the radio's lock through one write per step, and the waterfall lagged. */
 #define WR12_TTY        "/dev/ttyACM0"
 #define WR12_MIN_HZ     54000000
 #define WR12_MAX_HZ     1000000000
 #define WR12_IF_HZ      5060000     /* where the WR12 puts what it receives: the base listens there */
+#define WR12_GAP_US     20000       /* between two frequencies to it, at most 50 a second */
 #define X6200_IQSWAP    0x800000
 
-static bool    wr12_ready;      /* AT+INIT and the gains sent since the WR12 last answered a write */
-static bool    wr12_active;     /* listening through it: iqswap set, bypass off */
-static int32_t wr12_hz;         /* the frequency last sent to it */
+static pthread_mutex_t wr12_io = PTHREAD_MUTEX_INITIALIZER;    /* the port, and the frequency waiting */
+static pthread_cond_t  wr12_cv = PTHREAD_COND_INITIALIZER;
+static int             wr12_fd = -1;
+static bool            wr12_ready;      /* AT+INIT and the gains sent since the port was last opened */
+static bool            wr12_active;     /* listening through it: iqswap set, bypass off */
+static int32_t         wr12_hz;         /* the frequency last asked of it */
+static int32_t         wr12_want;       /* a frequency for the thread to send, 0 none */
+
+/* Under wr12_io */
+static bool wr12_write(const char *cmd, bool log) {
+    char buf[48];
+    int  n = snprintf(buf, sizeof(buf), "%s\r\n", cmd);
+    bool ok;
+
+    if (wr12_fd < 0) {
+        struct termios t;
+
+        wr12_fd = open(WR12_TTY, O_RDWR | O_NOCTTY | O_NONBLOCK);
+        if (wr12_fd < 0) {
+            return false;
+        }
+        if (tcgetattr(wr12_fd, &t) == 0) {
+            cfmakeraw(&t);
+            tcsetattr(wr12_fd, TCSANOW, &t);
+        }
+        wr12_ready = false;
+    }
+    ok = write(wr12_fd, buf, n) == n;
+    if (!ok) {
+        close(wr12_fd);         /* unplugged: opened again, and set up again, on the next write */
+        wr12_fd = -1;
+        wr12_ready = false;
+    }
+    if (log || !ok) {
+        fprintf(stderr, "hw_x6200: WR12 %s%s\n", cmd, ok ? "" : " (not sent)");
+    }
+    return ok;
+}
 
 static bool wr12_at(const char *cmd) {
-    char           buf[48];
-    int            n = snprintf(buf, sizeof(buf), "%s\r\n", cmd);
-    int            fd = open(WR12_TTY, O_RDWR | O_NOCTTY | O_NONBLOCK);
-    struct termios t;
-    bool           ok;
+    bool ok;
 
-    if (fd < 0) {
-        wr12_ready = false;
-        return false;
-    }
-    if (tcgetattr(fd, &t) == 0) {
-        cfmakeraw(&t);
-        tcsetattr(fd, TCSANOW, &t);
-    }
-    ok = write(fd, buf, n) == n;
-    tcdrain(fd);
-    close(fd);
-    if (!ok) {
-        wr12_ready = false;
-    }
-    fprintf(stderr, "hw_x6200: WR12 %s%s\n", cmd, ok ? "" : " (not sent)");
+    pthread_mutex_lock(&wr12_io);
+    ok = wr12_write(cmd, true);
+    pthread_mutex_unlock(&wr12_io);
     return ok;
 }
 
@@ -385,12 +408,50 @@ static void wr12_init(void) {
         "AT+INIT", "AT+LNAGAIN=15", "AT+VGAGAIN=0", "AT+MIXERGAIN=0", "AT+LNAAGCENA=1", "AT+MIXERAGCENA=1"
     };
 
-    wr12_ready = true;
-    for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]) && wr12_ready; i++) {
-        wr12_at(cmds[i]);
+    for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
+        if (!wr12_at(cmds[i])) {
+            return;
+        }
         usleep(50000);
     }
-    wr12_hz = 0;
+    wr12_ready = true;
+}
+
+static void *wr12_thread(void *arg) {
+    (void)arg;
+    pthread_mutex_lock(&wr12_io);
+    for (;;) {
+        while (!wr12_want) {
+            pthread_cond_wait(&wr12_cv, &wr12_io);
+        }
+        char cmd[32];
+
+        snprintf(cmd, sizeof(cmd), "AT+FREQ=%d", (int)wr12_want);
+        wr12_want = 0;
+        wr12_write(cmd, false);
+        pthread_mutex_unlock(&wr12_io);
+        usleep(WR12_GAP_US);
+        pthread_mutex_lock(&wr12_io);
+    }
+    return NULL;
+}
+
+static void wr12_tune(int32_t hz) {
+    static bool started;
+
+    if (!started) {
+        pthread_t t;
+
+        started = pthread_create(&t, NULL, wr12_thread, NULL) == 0;
+        if (started) {
+            pthread_detach(t);
+        }
+    }
+    pthread_mutex_lock(&wr12_io);
+    wr12_want = hz;
+    pthread_cond_signal(&wr12_cv);
+    pthread_mutex_unlock(&wr12_io);
+    wr12_hz = hz;
 }
 
 static void iqswap_set(bool on) {
@@ -411,16 +472,12 @@ static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
         return through;
     }
     if (through) {
-        char cmd[32];
-
         if (!wr12_ready) {
             wr12_init();
+            wr12_hz = 0;
         }
         if (hz != wr12_hz) {
-            snprintf(cmd, sizeof(cmd), "AT+FREQ=%d", (int)hz);
-            if (wr12_at(cmd)) {
-                wr12_hz = hz;
-            }
+            wr12_tune(hz);
         }
         if (!wr12_active) {
             wr12_at("AT+BYPASS=0");
