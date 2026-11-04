@@ -132,6 +132,7 @@ bool x6200_control_cmd(x6200_cmd_enum_t cmd, uint32_t arg) {
 
 static void wr12_start(void);
 static void wr12_vfo_switched(radio_vfo_t vfo);
+static void wr12_split_set(bool on);
 
 /* ---- Init ----------------------------------------------------------------------------- */
 
@@ -241,7 +242,7 @@ bool hw_set_i(hw_param_t p, int32_t v) {
     }
     switch (p) {
         case HW_VFO_CUR:        x6200_control_vfo_set((x6200_vfo_t)v); wr12_vfo_switched((radio_vfo_t)v); break;
-        case HW_SPLIT:          x6200_control_split_set(v); break;
+        case HW_SPLIT:          wr12_split_set(v); break;
         case HW_RFG:            x6200_control_rfg_set(v); break;
         /* One squelch setting in the GUI, two on the base (voice and FM): both follow it */
         case HW_SQL:            x6200_control_sql_set(v); x6200_control_sql_fm_set(v); break;
@@ -358,8 +359,9 @@ bool hw_set_f(hw_param_t p, float v) {
  *   register 12 (the stock app's "iqswap") set, and the base tuned to the WR12's output, 5.06 MHz (the stock
  *   app's BaseCommIIC::parseParamItem sends any VFO above 54 MHz as 5060000 while a WR12 is there). Below 54 MHz:
  *   iqswap off, the WR12's bypass on, the base tuned as ever.
- * - while listening through it the base's TX outside the ham bands is shut (base_open_tx_set), as the stock app
+ * - while it is there and on, the base's TX outside the ham bands is shut (base_open_tx_set), as the stock app
  *   always has it: the hand mic's PTT keys the base by itself, and with it open the base went out on 5.06 MHz.
+ *   Its split is held off while listening through it, and the bypass goes on before the base is on HF again.
  * The port stays open and each command waits for its OK, as the stock app's. The frequency goes from a thread of
  * its own, the latest one only: a knob turned fast held the radio's lock through one write per step, and the
  * spectrum lagged. */
@@ -378,6 +380,9 @@ static int             wr12_fd = -1;
 static volatile int    wr12_state = -1; /* hw_wr12_state() */
 static bool            wr12_ready;      /* set up since it was last found */
 static bool            wr12_active;     /* listening through it: iqswap set, bypass off */
+static bool            wr12_in_use;     /* there and on: the base's TX kept to the ham bands */
+static bool            wr12_split;      /* split as the GUI asked it, held off in the base while listening through it */
+static volatile bool   wr12_bypass_owed; /* AT+BYPASS=1 not answered: asked again each second */
 static int32_t         wr12_hz;         /* the frequency last asked of it */
 static int32_t         wr12_vfo_hz[2];  /* what each VFO was last tuned to (hw_vfo_set_freq), 0 not yet */
 static int32_t         wr12_want;       /* a frequency for the thread to send, 0 none */
@@ -459,6 +464,16 @@ static bool wr12_at(const char *cmd) {
     return ok;
 }
 
+/* `cmd` sent to the WR12 and its OK back */
+static bool wr12_at_ok(const char *cmd) {
+    bool ok;
+
+    pthread_mutex_lock(&wr12_io);
+    ok = wr12_write(cmd, true) && wr12_ok;
+    pthread_mutex_unlock(&wr12_io);
+    return ok;
+}
+
 static void wr12_init(void) {
     static const char *const cmds[] = {
         "AT+INIT", "AT+LNAGAIN=15", "AT+VGAGAIN=0", "AT+MIXERGAIN=0", "AT+LNAAGCENA=1", "AT+MIXERAGCENA=1"
@@ -533,7 +548,9 @@ static void *wr12_watch(void *arg) {
             pthread_mutex_unlock(&wr12_io);
             if (ok) {
                 wr12_init();
-                wr12_at(wr12_active ? "AT+BYPASS=0" : "AT+BYPASS=1");
+                /* bypass on whatever: off again with the next tuning above 54 MHz (wr12_hz 0). Sent by this thread
+                 * as listening through it was, a crossing to HF meanwhile left it out of bypass on HF */
+                wr12_bypass_owed = !wr12_at_ok("AT+BYPASS=1");
                 fprintf(stderr, "hw_x6200: WR12 found on %s\n", path);
             } else {
                 wr12_gpsd("add", path);
@@ -554,6 +571,9 @@ static void *wr12_watch(void *arg) {
                 fprintf(stderr, "hw_x6200: WR12 gone\n");
             }
             wr12_state = 0;
+        }
+        if (wr12_bypass_owed && wr12_state == 1 && !wr12_active && wr12_at_ok("AT+BYPASS=1")) {
+            wr12_bypass_owed = false;
         }
         sleep(1);
     }
@@ -664,6 +684,72 @@ static bool base_open_tx_set(bool on) {
     return ok;
 }
 
+/* The base's VFO register for `vfo` on `hz`: false when it was there already */
+static bool base_freq_set(radio_vfo_t vfo, int32_t hz) {
+    if (x6200_control_get(vfo == RADIO_VFO_A ? x6200_vfoa_freq : x6200_vfob_freq) == (uint32_t)hz) {
+        return false;
+    }
+    x6200_control_vfo_freq_set((x6200_vfo_t)vfo, hz);
+    return true;
+}
+
+/* Bypass off: the base already on the WR12's output with its TX shut (in use), never on HF while the WR12 takes
+ * the antenna. The base's split held off meanwhile: with the TX VFO on HF, the hand mic's PTT went out there, into
+ * the WR12 */
+static void wr12_enter(void) {
+    if (wr12_split) {
+        x6200_control_split_set(false);
+    }
+    iqswap_set(true);
+    wr12_at("AT+BYPASS=0");
+    wr12_active = true;
+}
+
+/* Bypass on before the base is back on HF. Not answered with the WR12 there: asked again each second (wr12_watch),
+ * as a WR12 out of bypass on HF would take the transmission */
+static void wr12_leave(void) {
+    wr12_bypass_owed = !wr12_at_ok("AT+BYPASS=1") && wr12_state == 1;
+    iqswap_set(false);
+    wr12_active = false;
+    if (wr12_split) {
+        x6200_control_split_set(true);
+    }
+}
+
+/* In use: there and on (Settings > General > WR12 on HOST). Then the base's TX stays in the ham bands, as the
+ * stock app always has it: every VFO above 54 MHz sits on 5.06 MHz in the base, and the hand mic's PTT keys the
+ * base by itself on whichever VFO transmits. Out of use: through the WR12 no more, each VFO left on its output back
+ * on its own frequency, and only then TX outside the ham bands open again */
+static void wr12_use_check(void) {
+    bool use = wr12_state == 1 && param_i_get(cfg_wr12);
+
+    if (use == wr12_in_use) {
+        return;
+    }
+    wr12_in_use = use;
+    if (use) {
+        base_open_tx_set(false);
+        return;
+    }
+    if (wr12_active) {
+        wr12_leave();
+    }
+    for (int v = RADIO_VFO_A; v <= RADIO_VFO_B; v++) {
+        int32_t hz = wr12_vfo_hz[v == RADIO_VFO_B];
+
+        if (hz && x6200_control_get(v == RADIO_VFO_A ? x6200_vfoa_freq : x6200_vfob_freq) == WR12_IF_HZ) {
+            base_freq_set((radio_vfo_t)v, hz);
+        }
+    }
+    base_open_tx_set(true);
+}
+
+/* The GUI's split, held off in the base while listening through the WR12 (wr12_enter) */
+static void wr12_split_set(bool on) {
+    wr12_split = on;
+    x6200_control_split_set(on && !wr12_active);
+}
+
 /* A/B: the VFO now current tuned again, through the WR12 or not. Only the current VFO drives it, and nothing else
  * looked again: A on 2 m and B on 40 m, B kept the WR12 out of bypass and iqswap on (HF through its VHF path, a
  * transmission into it), and back on A the base stayed on 145.5 MHz itself, deaf (4-nov) */
@@ -675,50 +761,32 @@ static void wr12_vfo_switched(radio_vfo_t vfo) {
     }
 }
 
-/* True when the WR12 takes `hz`: the base is then tuned to WR12_IF_HZ. Only the current VFO drives the WR12. */
-static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
-    bool through = wr12_state == 1 && param_i_get(cfg_wr12) && hz >= WR12_MIN_HZ && hz <= WR12_MAX_HZ;
+/* Above 54 MHz with the WR12 in use, the base is on the WR12's output (the stock app's BaseCommIIC::parseParamItem
+ * sends any VFO there as 5060000), and the current VFO drives the WR12. The order keeps HF power off the WR12: into
+ * it, the base leaves HF before the bypass goes off; out of it, the bypass is on before the base is back on HF */
+bool hw_vfo_set_freq(radio_vfo_t vfo, int32_t hz) {
+    bool cur = vfo == (radio_vfo_t)param_i_get(cfg_band_current_vfo);
 
-    if (vfo != (radio_vfo_t)param_i_get(cfg_band_current_vfo)) {
-        return through;
+    wr12_vfo_hz[vfo == RADIO_VFO_B] = hz;
+    wr12_use_check();
+    if (!wr12_in_use || hz < WR12_MIN_HZ || hz > WR12_MAX_HZ) {
+        if (cur && wr12_active) {
+            wr12_leave();
+        }
+        return base_freq_set(vfo, hz);
     }
-    if (through) {
+    base_freq_set(vfo, WR12_IF_HZ);
+    if (cur) {
         if (!wr12_ready) {
             wr12_init();
+        }
+        if (!wr12_active || !wr12_hz) {     /* found again: its bypass back off */
+            wr12_enter();
         }
         if (hz != wr12_hz) {
             wr12_tune(hz);
         }
-        if (!wr12_active) {
-            base_open_tx_set(false);   /* before the base is on 5.06 MHz */
-            wr12_at("AT+BYPASS=0");
-            iqswap_set(true);
-            wr12_active = true;
-        }
-        return true;
     }
-    if (wr12_active) {
-        iqswap_set(false);
-        wr12_at("AT+BYPASS=1");
-        wr12_active = false;
-        base_open_tx_set(true);
-    }
-    return false;
-}
-
-bool hw_vfo_set_freq(radio_vfo_t vfo, int32_t hz) {
-    wr12_vfo_hz[vfo == RADIO_VFO_B] = hz;
-    if (wr12_route(vfo, hz)) {     /* the WR12 moved: the base stays on its output */
-        if (x6200_control_get(vfo == RADIO_VFO_A ? x6200_vfoa_freq : x6200_vfob_freq) != WR12_IF_HZ) {
-            x6200_control_vfo_freq_set((x6200_vfo_t)vfo, WR12_IF_HZ);
-        }
-        return true;
-    }
-
-    if (x6200_control_get(vfo == RADIO_VFO_A ? x6200_vfoa_freq : x6200_vfob_freq) == (uint32_t)hz) {
-        return false;
-    }
-    x6200_control_vfo_freq_set((x6200_vfo_t)vfo, hz);
     return true;
 }
 
