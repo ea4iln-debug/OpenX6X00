@@ -32,6 +32,10 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <linux/i2c.h>
+#include <linux/i2c-dev.h>
+#include <sys/ioctl.h>
+
 /* The GUI's enums (radio_types.h) are the library's numbers, except the modes: the X6200 has
  * SAM between AM and NFM (lib_mode() below) */
 #define SAME(a, b) _Static_assert((int)(a) == (int)(b), #a " is not " #b)
@@ -353,6 +357,8 @@ bool hw_set_f(hw_param_t p, float v) {
  *   register 12 (the stock app's "iqswap") set, and the base tuned to the WR12's output, 5.06 MHz (the stock
  *   app's BaseCommIIC::parseParamItem sends any VFO above 54 MHz as 5060000 while a WR12 is there). Below 54 MHz:
  *   iqswap off, the WR12's bypass on, the base tuned as ever.
+ * - while listening through it the base's TX outside the ham bands is shut (base_open_tx_set), as the stock app
+ *   always has it: the hand mic's PTT keys the base by itself, and with it open the base went out on 5.06 MHz.
  * The port stays open and each command waits for its OK, as the stock app's. The frequency goes from a thread of
  * its own, the latest one only: a knob turned fast held the radio's lock through one write per step, and the
  * spectrum lagged. */
@@ -609,6 +615,53 @@ static void iqswap_set(bool on) {
     }
 }
 
+/* The base's TX outside the ham bands: byte 280 of its calibration block, 1 open. X6200Control opens it at start
+ * (x6200_control_init); the stock app leaves it shut, and the base then keys only inside the band table of the same
+ * block (160 to 6 m; 60 m 5.332-5.405 MHz). Shut while listening through the WR12: the hand mic's PTT keys the base
+ * by itself, without a word to the GUI, and with it open the base went out on the WR12's 5.06 MHz at the 2 W set
+ * (4-nov, dummy load on the radio). The block read back from the base and sent whole, as the library does. */
+#define BASE_I2C_ADDR       0x72
+#define BASE_CAL_READ       0x0100
+#define BASE_CAL_WRITE      0xf000
+#define BASE_CAL_LEN        507
+#define BASE_CAL_OPEN_TX    280
+
+static bool base_open_tx_set(bool on) {
+    uint8_t                    block[2 + BASE_CAL_LEN];
+    uint8_t                    reg[2] = { BASE_CAL_READ >> 8, BASE_CAL_READ & 0xff };
+    struct i2c_msg             rd_msgs[] = {
+        { .addr = BASE_I2C_ADDR, .flags = 0, .len = sizeof(reg), .buf = reg },
+        { .addr = BASE_I2C_ADDR, .flags = I2C_M_RD, .len = BASE_CAL_LEN, .buf = block + 2 },
+    };
+    struct i2c_msg             wr_msg = { .addr = BASE_I2C_ADDR, .flags = 0, .len = sizeof(block), .buf = block };
+    struct i2c_rdwr_ioctl_data rd = { .msgs = rd_msgs, .nmsgs = 2 };
+    struct i2c_rdwr_ioctl_data wr = { .msgs = &wr_msg, .nmsgs = 1 };
+    int                        fd = open("/dev/i2c-0", O_RDWR);
+    bool                       ok;
+
+    if (fd < 0) {
+        fprintf(stderr, "hw_x6200: TX outside the ham bands not %s: /dev/i2c-0: %s\n", on ? "opened" : "shut",
+                strerror(errno));
+        return false;
+    }
+    ok = ioctl(fd, I2C_RDWR, &rd) >= 0;
+    if (ok && block[2 + BASE_CAL_OPEN_TX] > 1) {     /* as the library: not the layout it knows, left alone */
+        fprintf(stderr, "hw_x6200: calibration byte %d is %u, TX outside the ham bands left as it is\n",
+                BASE_CAL_OPEN_TX, block[2 + BASE_CAL_OPEN_TX]);
+        close(fd);
+        return false;
+    }
+    if (ok) {
+        block[0] = BASE_CAL_WRITE >> 8;
+        block[1] = BASE_CAL_WRITE & 0xff;
+        block[2 + BASE_CAL_OPEN_TX] = on;
+        ok = ioctl(fd, I2C_RDWR, &wr) >= 0;
+    }
+    close(fd);
+    fprintf(stderr, "hw_x6200: TX outside the ham bands %s%s\n", on ? "open" : "shut", ok ? "" : ": failed");
+    return ok;
+}
+
 /* True when the WR12 takes `hz`: the base is then tuned to WR12_IF_HZ. Only the current VFO drives the WR12. */
 static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
     bool through = wr12_state == 1 && param_i_get(cfg_wr12) && hz >= WR12_MIN_HZ && hz <= WR12_MAX_HZ;
@@ -624,6 +677,7 @@ static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
             wr12_tune(hz);
         }
         if (!wr12_active) {
+            base_open_tx_set(false);   /* before the base is on 5.06 MHz */
             wr12_at("AT+BYPASS=0");
             iqswap_set(true);
             wr12_active = true;
@@ -634,6 +688,7 @@ static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
         iqswap_set(false);
         wr12_at("AT+BYPASS=1");
         wr12_active = false;
+        base_open_tx_set(true);
     }
     return false;
 }
