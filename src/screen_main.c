@@ -1524,9 +1524,11 @@ static void wr12_poll_cb(lv_timer_t *t) {
     if (st < 0 || st == last) return;
     last = st;
     freq_strip_set_wr12(st == 1);
+    LV_LOG_USER("WR12 %s", st ? "found" : "gone");
     if (param_i_get(cfg_wr12) != st) {
-        LV_LOG_USER("WR12 %s", st ? "found: on" : "gone: off");
-        param_i_set(cfg_wr12, st);
+        param_i_set(cfg_wr12, st);     /* on_wr12_change: the bands, and the frequency again */
+    } else {
+        radio_set_freq(cparam_i_get(cfg_fg_freq));  /* at the start the VFO was tuned before it was found */
     }
 }
 
