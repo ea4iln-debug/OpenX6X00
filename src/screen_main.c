@@ -1453,9 +1453,11 @@ static void band_usable_check(void *arg) {
 }
 
 /* Settings > General > WR12 on HOST (the X6200, also on the web Display page): the bands above 55 MHz come or go,
- * the band keys and the band plan strip follow */
+ * the band keys and the band plan strip follow. The frequency is sent again: on FM broadcast, which the X6200 hears
+ * without the WR12 too, the band stays, and the base was left on the WR12 output (5.06 MHz) */
 static void on_wr12_change(Subject *subj, void *user_data) {
     band_usable_check(NULL);
+    radio_set_freq(cparam_i_get(cfg_fg_freq));  /* through the WR12 or not: on FM broadcast the band stays */
     band_plan_reload();
     band_plan_refresh();
 }
