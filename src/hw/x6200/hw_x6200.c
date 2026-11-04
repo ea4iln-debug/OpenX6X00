@@ -490,32 +490,53 @@ static bool wr12_find(char *path, size_t size) {
     return false;
 }
 
+/* gpsd told to leave `path`, or to take it again */
+static void wr12_gpsd(const char *how, const char *path) {
+    char cmd[64];
+
+    snprintf(cmd, sizeof(cmd), "gpsdctl %s %s > /dev/null 2>&1", how, path);
+    if (system(cmd) != 0) {
+        /* no gpsd running: nothing to give or take */
+    }
+}
+
+/* Each second: a WR12 plugged in or out. Another device on the same chip (a GPS on an STM serial port) does not
+ * answer AT+AYT: it goes back to gpsd and is not asked again until it is unplugged */
 static void *wr12_watch(void *arg) {
+    char not_wr12[24] = "";
+
     (void)arg;
     for (;;) {
         char path[24];
         bool found = wr12_find(path, sizeof(path));
 
-        if (found && wr12_state != 1) {
-            char cmd[64];
+        if (found && wr12_state != 1 && strcmp(path, not_wr12)) {
             bool ok;
 
-            snprintf(cmd, sizeof(cmd), "gpsdctl remove %s > /dev/null 2>&1", path);
-            if (system(cmd) != 0) {
-                /* no gpsd, or it did not have it */
-            }
+            wr12_gpsd("remove", path);
             pthread_mutex_lock(&wr12_io);
             wr12_close();
             snprintf(wr12_path, sizeof(wr12_path), "%s", path);
             ok = wr12_ask("AT+AYT");
+            if (!ok) {
+                wr12_close();
+                wr12_path[0] = '\0';
+            }
             pthread_mutex_unlock(&wr12_io);
             if (ok) {
                 wr12_init();
                 wr12_at(wr12_active ? "AT+BYPASS=0" : "AT+BYPASS=1");
                 fprintf(stderr, "hw_x6200: WR12 found on %s\n", path);
+            } else {
+                wr12_gpsd("add", path);
+                snprintf(not_wr12, sizeof(not_wr12), "%s", path);
+                fprintf(stderr, "hw_x6200: %s does not answer as a WR12: left to gpsd\n", path);
             }
             wr12_state = ok;
-        } else if (!found && wr12_state != 0) {
+        } else if (!found) {
+            not_wr12[0] = '\0';
+        }
+        if (!found && wr12_state != 0) {
             pthread_mutex_lock(&wr12_io);
             wr12_close();
             wr12_path[0] = '\0';
