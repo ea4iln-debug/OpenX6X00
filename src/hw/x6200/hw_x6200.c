@@ -131,6 +131,7 @@ bool x6200_control_cmd(x6200_cmd_enum_t cmd, uint32_t arg) {
 }
 
 static void wr12_start(void);
+static void wr12_vfo_switched(radio_vfo_t vfo);
 
 /* ---- Init ----------------------------------------------------------------------------- */
 
@@ -239,7 +240,7 @@ bool hw_set_i(hw_param_t p, int32_t v) {
         return true;
     }
     switch (p) {
-        case HW_VFO_CUR:        x6200_control_vfo_set((x6200_vfo_t)v); break;
+        case HW_VFO_CUR:        x6200_control_vfo_set((x6200_vfo_t)v); wr12_vfo_switched((radio_vfo_t)v); break;
         case HW_SPLIT:          x6200_control_split_set(v); break;
         case HW_RFG:            x6200_control_rfg_set(v); break;
         /* One squelch setting in the GUI, two on the base (voice and FM): both follow it */
@@ -378,6 +379,7 @@ static volatile int    wr12_state = -1; /* hw_wr12_state() */
 static bool            wr12_ready;      /* set up since it was last found */
 static bool            wr12_active;     /* listening through it: iqswap set, bypass off */
 static int32_t         wr12_hz;         /* the frequency last asked of it */
+static int32_t         wr12_vfo_hz[2];  /* what each VFO was last tuned to (hw_vfo_set_freq), 0 not yet */
 static int32_t         wr12_want;       /* a frequency for the thread to send, 0 none */
 static bool            wr12_ok;         /* the last command answered OK */
 
@@ -662,6 +664,17 @@ static bool base_open_tx_set(bool on) {
     return ok;
 }
 
+/* A/B: the VFO now current tuned again, through the WR12 or not. Only the current VFO drives it, and nothing else
+ * looked again: A on 2 m and B on 40 m, B kept the WR12 out of bypass and iqswap on (HF through its VHF path, a
+ * transmission into it), and back on A the base stayed on 145.5 MHz itself, deaf (4-nov) */
+static void wr12_vfo_switched(radio_vfo_t vfo) {
+    int32_t hz = wr12_vfo_hz[vfo == RADIO_VFO_B];
+
+    if (hz) {
+        hw_vfo_set_freq(vfo, hz);
+    }
+}
+
 /* True when the WR12 takes `hz`: the base is then tuned to WR12_IF_HZ. Only the current VFO drives the WR12. */
 static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
     bool through = wr12_state == 1 && param_i_get(cfg_wr12) && hz >= WR12_MIN_HZ && hz <= WR12_MAX_HZ;
@@ -694,6 +707,7 @@ static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
 }
 
 bool hw_vfo_set_freq(radio_vfo_t vfo, int32_t hz) {
+    wr12_vfo_hz[vfo == RADIO_VFO_B] = hz;
     if (wr12_route(vfo, hz)) {     /* the WR12 moved: the base stays on its output */
         if (x6200_control_get(vfo == RADIO_VFO_A ? x6200_vfoa_freq : x6200_vfob_freq) != WR12_IF_HZ) {
             x6200_control_vfo_freq_set((x6200_vfo_t)vfo, WR12_IF_HZ);
