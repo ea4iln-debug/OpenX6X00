@@ -342,11 +342,13 @@ bool hw_set_f(hw_param_t p, float v) {
 
 /* As the stock app does it (MainWidget::updateVfoFrequency, XWBReceiverComm::start): with the WR12 on and the
  * current VFO at 54 MHz-1 GHz, the WR12 is tuned over its USB serial port and its bypass is off, bit 23 of
- * register 12 (the stock app's "iqswap") is set, and the base is not sent the frequency. Below 54 MHz: iqswap
- * off, the WR12's bypass on, the base tuned as ever. /tmp/wr12_sendfreq (a test) sends the base the frequency too. */
+ * register 12 (the stock app's "iqswap") is set, and the base is tuned to the WR12's output, 5.06 MHz (the stock
+ * app's BaseCommIIC::parseParamItem sends any VFO above 54 MHz as 5060000 while a WR12 is there). Below 54 MHz:
+ * iqswap off, the WR12's bypass on, the base tuned as ever. */
 #define WR12_TTY        "/dev/ttyACM0"
 #define WR12_MIN_HZ     54000000
 #define WR12_MAX_HZ     1000000000
+#define WR12_IF_HZ      5060000     /* where the WR12 puts what it receives: the base listens there */
 #define X6200_IQSWAP    0x800000
 
 static bool    wr12_ready;      /* AT+INIT and the gains sent since the WR12 last answered a write */
@@ -401,14 +403,13 @@ static void iqswap_set(bool on) {
     }
 }
 
-/* True when the WR12 takes `hz` and the base is not to be sent it */
+/* True when the WR12 takes `hz`: the base is then tuned to WR12_IF_HZ. Only the current VFO drives the WR12. */
 static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
-    bool through;
+    bool through = param_i_get(cfg_wr12) && hz >= WR12_MIN_HZ && hz <= WR12_MAX_HZ;
 
     if (vfo != (radio_vfo_t)param_i_get(cfg_band_current_vfo)) {
-        return wr12_active && access("/tmp/wr12_sendfreq", F_OK) != 0;
+        return through;
     }
-    through = param_i_get(cfg_wr12) && hz >= WR12_MIN_HZ && hz <= WR12_MAX_HZ;
     if (through) {
         char cmd[32];
 
@@ -426,7 +427,7 @@ static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
             iqswap_set(true);
             wr12_active = true;
         }
-        return access("/tmp/wr12_sendfreq", F_OK) != 0;
+        return true;
     }
     if (wr12_active) {
         iqswap_set(false);
@@ -437,7 +438,10 @@ static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
 }
 
 bool hw_vfo_set_freq(radio_vfo_t vfo, int32_t hz) {
-    if (wr12_route(vfo, hz)) {
+    if (wr12_route(vfo, hz)) {     /* the WR12 moved: the base stays on its output */
+        if (x6200_control_get(vfo == RADIO_VFO_A ? x6200_vfoa_freq : x6200_vfob_freq) != WR12_IF_HZ) {
+            x6200_control_vfo_freq_set((x6200_vfo_t)vfo, WR12_IF_HZ);
+        }
         return true;
     }
 
