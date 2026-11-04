@@ -372,6 +372,7 @@ static bool            wr12_ready;      /* set up since it was last found */
 static bool            wr12_active;     /* listening through it: iqswap set, bypass off */
 static int32_t         wr12_hz;         /* the frequency last asked of it */
 static int32_t         wr12_want;       /* a frequency for the thread to send, 0 none */
+static bool            wr12_ok;         /* the last command answered OK */
 
 /* Under wr12_io */
 static void wr12_close(void) {
@@ -381,11 +382,31 @@ static void wr12_close(void) {
     }
 }
 
-/* Under wr12_io */
+/* Under wr12_io: OK (true) or ERROR back within `ms` */
+static bool wr12_reply(int ms) {
+    char   buf[96];
+    size_t n = 0;
+
+    for (int i = 0; i < ms / 10 && n < sizeof(buf) - 1; i++) {
+        struct pollfd p = {wr12_fd, POLLIN, 0};
+        ssize_t       r;
+
+        if (poll(&p, 1, 10) > 0 && (r = read(wr12_fd, buf + n, sizeof(buf) - 1 - n)) > 0) {
+            n += r;
+            buf[n] = '\0';
+            if (strstr(buf, "OK")) return true;
+            if (strstr(buf, "ERROR")) return false;
+        }
+    }
+    return false;
+}
+
+/* Under wr12_io. Each command waits for its answer, as the stock app's (XWBReceiverComm::writeAtCommand): two sent
+ * together, the WR12 dropped one (plugged in again on 96.9 MHz: BYPASS=0 kept, the frequency lost, 144 MHz left) */
 static bool wr12_write(const char *cmd, bool log) {
     char buf[48];
     int  n = snprintf(buf, sizeof(buf), "%s\r\n", cmd);
-    bool ok;
+    bool ok, answered = false;
 
     if (wr12_fd < 0 && wr12_path[0]) {
         struct termios t;
@@ -396,40 +417,25 @@ static bool wr12_write(const char *cmd, bool log) {
             tcsetattr(wr12_fd, TCSANOW, &t);
         }
     }
-    ok = wr12_fd >= 0 && write(wr12_fd, buf, n) == n;
-    if (!ok) {
-        wr12_close();
-    }
-    if (log || !ok) {
-        fprintf(stderr, "hw_x6200: WR12 %s%s\n", cmd, ok ? "" : " (not sent)");
-    }
-    return ok;
-}
-
-/* Under wr12_io: `cmd` sent and OK back within half a second */
-static bool wr12_ask(const char *cmd) {
-    char   buf[96];
-    size_t n = 0;
-
     if (wr12_fd >= 0) {
         tcflush(wr12_fd, TCIFLUSH);
     }
-    if (!wr12_write(cmd, true)) {
-        return false;
+    ok = wr12_fd >= 0 && write(wr12_fd, buf, n) == n;
+    if (ok) {
+        answered = wr12_reply(300);
+    } else {
+        wr12_close();
     }
-    for (int i = 0; i < 10 && n < sizeof(buf) - 1; i++) {
-        struct pollfd p = {wr12_fd, POLLIN, 0};
-        ssize_t       r;
+    if (log || !answered) {
+        fprintf(stderr, "hw_x6200: WR12 %s%s\n", cmd, !ok ? " (not sent)" : answered ? "" : " (no OK)");
+    }
+    wr12_ok = answered;
+    return ok;
+}
 
-        if (poll(&p, 1, 50) > 0 && (r = read(wr12_fd, buf + n, sizeof(buf) - 1 - n)) > 0) {
-            n += r;
-            buf[n] = '\0';
-            if (strstr(buf, "OK")) {
-                return true;
-            }
-        }
-    }
-    return false;
+/* Under wr12_io: `cmd` sent and OK back */
+static bool wr12_ask(const char *cmd) {
+    return wr12_write(cmd, true) && wr12_ok;
 }
 
 static bool wr12_at(const char *cmd) {
