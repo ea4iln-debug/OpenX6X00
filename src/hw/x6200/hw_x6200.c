@@ -401,30 +401,33 @@ static bool wr12_reply(int ms) {
     return false;
 }
 
-/* Under wr12_io. Each command waits for its answer, as the stock app's (XWBReceiverComm::writeAtCommand): two sent
- * together, the WR12 dropped one (plugged in again on 96.9 MHz: BYPASS=0 kept, the frequency lost, 144 MHz left) */
+/* Under wr12_io. Each command waits for its answer, half a second, three tries, as the stock app's
+ * (XWBReceiverComm::writeAtCommand(..., 500, 3)): two sent together, the WR12 dropped one (plugged in again on
+ * 96.9 MHz: BYPASS=0 kept, the frequency lost, 144 MHz left); right after AT+INIT it took over 0.3 s */
 static bool wr12_write(const char *cmd, bool log) {
     char buf[48];
     int  n = snprintf(buf, sizeof(buf), "%s\r\n", cmd);
-    bool ok, answered = false;
+    bool ok = false, answered = false;
 
-    if (wr12_fd < 0 && wr12_path[0]) {
-        struct termios t;
+    for (int tries = 0; tries < 3 && !answered; tries++) {
+        if (wr12_fd < 0 && wr12_path[0]) {
+            struct termios t;
 
-        wr12_fd = open(wr12_path, O_RDWR | O_NOCTTY | O_NONBLOCK);
-        if (wr12_fd >= 0 && tcgetattr(wr12_fd, &t) == 0) {
-            cfmakeraw(&t);
-            tcsetattr(wr12_fd, TCSANOW, &t);
+            wr12_fd = open(wr12_path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+            if (wr12_fd >= 0 && tcgetattr(wr12_fd, &t) == 0) {
+                cfmakeraw(&t);
+                tcsetattr(wr12_fd, TCSANOW, &t);
+            }
         }
-    }
-    if (wr12_fd >= 0) {
-        tcflush(wr12_fd, TCIFLUSH);
-    }
-    ok = wr12_fd >= 0 && write(wr12_fd, buf, n) == n;
-    if (ok) {
-        answered = wr12_reply(300);
-    } else {
-        wr12_close();
+        if (wr12_fd >= 0) {
+            tcflush(wr12_fd, TCIFLUSH);
+        }
+        ok = wr12_fd >= 0 && write(wr12_fd, buf, n) == n;
+        if (!ok) {
+            wr12_close();       /* unplugged: no use trying again */
+            break;
+        }
+        answered = wr12_reply(500);
     }
     if (log || !answered) {
         fprintf(stderr, "hw_x6200: WR12 %s%s\n", cmd, !ok ? " (not sent)" : answered ? "" : " (no OK)");
