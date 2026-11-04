@@ -13,6 +13,7 @@
 #define _GNU_SOURCE
 #include "../hw.h"
 #include "../../base_guard.h"
+#include "../../cfg/cfg_api.h"
 
 #include <aether_radio/x6200_control/control.h>
 #include <aether_radio/x6200_control/low/flow.h>
@@ -21,10 +22,12 @@
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 
 /* The GUI's enums (radio_types.h) are the library's numbers, except the modes: the X6200 has
@@ -335,7 +338,109 @@ bool hw_set_f(hw_param_t p, float v) {
     return true;
 }
 
+/* ---- The WR12, Xiegu's 54 MHz-1 GHz receiver on HOST ------------------------------------ */
+
+/* As the stock app does it (MainWidget::updateVfoFrequency, XWBReceiverComm::start): with the WR12 on and the
+ * current VFO at 54 MHz-1 GHz, the WR12 is tuned over its USB serial port and its bypass is off, bit 23 of
+ * register 12 (the stock app's "iqswap") is set, and the base is not sent the frequency. Below 54 MHz: iqswap
+ * off, the WR12's bypass on, the base tuned as ever. /tmp/wr12_sendfreq (a test) sends the base the frequency too. */
+#define WR12_TTY        "/dev/ttyACM0"
+#define WR12_MIN_HZ     54000000
+#define WR12_MAX_HZ     1000000000
+#define X6200_IQSWAP    0x800000
+
+static bool    wr12_ready;      /* AT+INIT and the gains sent since the WR12 last answered a write */
+static bool    wr12_active;     /* listening through it: iqswap set, bypass off */
+static int32_t wr12_hz;         /* the frequency last sent to it */
+
+static bool wr12_at(const char *cmd) {
+    char           buf[48];
+    int            n = snprintf(buf, sizeof(buf), "%s\r\n", cmd);
+    int            fd = open(WR12_TTY, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    struct termios t;
+    bool           ok;
+
+    if (fd < 0) {
+        wr12_ready = false;
+        return false;
+    }
+    if (tcgetattr(fd, &t) == 0) {
+        cfmakeraw(&t);
+        tcsetattr(fd, TCSANOW, &t);
+    }
+    ok = write(fd, buf, n) == n;
+    tcdrain(fd);
+    close(fd);
+    if (!ok) {
+        wr12_ready = false;
+    }
+    fprintf(stderr, "hw_x6200: WR12 %s%s\n", cmd, ok ? "" : " (not sent)");
+    return ok;
+}
+
+static void wr12_init(void) {
+    static const char *const cmds[] = {
+        "AT+INIT", "AT+LNAGAIN=15", "AT+VGAGAIN=0", "AT+MIXERGAIN=0", "AT+LNAAGCENA=1", "AT+MIXERAGCENA=1"
+    };
+
+    wr12_ready = true;
+    for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]) && wr12_ready; i++) {
+        wr12_at(cmds[i]);
+        usleep(50000);
+    }
+    wr12_hz = 0;
+}
+
+static void iqswap_set(bool on) {
+    uint32_t r = x6200_control_get(x6200_sple_atue_trx);
+    uint32_t n = on ? (r | X6200_IQSWAP) : (r & ~(uint32_t)X6200_IQSWAP);
+
+    if (n != r) {
+        x6200_control_cmd(x6200_sple_atue_trx, n);
+        fprintf(stderr, "hw_x6200: iqswap %s\n", on ? "on" : "off");
+    }
+}
+
+/* True when the WR12 takes `hz` and the base is not to be sent it */
+static bool wr12_route(radio_vfo_t vfo, int32_t hz) {
+    bool through;
+
+    if (vfo != (radio_vfo_t)param_i_get(cfg_band_current_vfo)) {
+        return wr12_active && access("/tmp/wr12_sendfreq", F_OK) != 0;
+    }
+    through = param_i_get(cfg_wr12) && hz >= WR12_MIN_HZ && hz <= WR12_MAX_HZ;
+    if (through) {
+        char cmd[32];
+
+        if (!wr12_ready) {
+            wr12_init();
+        }
+        if (hz != wr12_hz) {
+            snprintf(cmd, sizeof(cmd), "AT+FREQ=%d", (int)hz);
+            if (wr12_at(cmd)) {
+                wr12_hz = hz;
+            }
+        }
+        if (!wr12_active) {
+            wr12_at("AT+BYPASS=0");
+            iqswap_set(true);
+            wr12_active = true;
+        }
+        return access("/tmp/wr12_sendfreq", F_OK) != 0;
+    }
+    if (wr12_active) {
+        iqswap_set(false);
+        wr12_at("AT+BYPASS=1");
+        wr12_active = false;
+    }
+    return false;
+}
+
 bool hw_vfo_set_freq(radio_vfo_t vfo, int32_t hz) {
+    if (wr12_route(vfo, hz)) {
+        return true;
+    }
+
     if (x6200_control_get(vfo == RADIO_VFO_A ? x6200_vfoa_freq : x6200_vfob_freq) == (uint32_t)hz) {
         return false;
     }
