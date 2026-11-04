@@ -51,11 +51,11 @@ int freq_strip_step_char(const char *text, int32_t step, bool *big) {
 
 #define QTH_POLL_MS 3000
 #define BC_TOLERANCE_HZ 2000    /* as the SWL panel of the GENE key */
+#define WR12_BLUE   0x1E6FD9    /* the stock app's WR12 sign */
 
 static char      app[16];
 static lv_obj_t *strip, *band_label, *freq_label, *mode_label, *qth_dot, *qth_label, *tx_label;
 static lv_obj_t *nr_label, *nb_label, *dnf_label, *rit_label, *xit_label;
-#define WR12_BLUE        0x1E6FD9      /* the stock app's WR12 sign */
 static lv_obj_t *wr12_label;        /* WR12 while the X6200's WR12 is found, kept over a theme change */
 static bool      wr12_shown;
 static lv_obj_t *freq_small, *other_label, *vfo_badge;   /* deck: the 10 Hz digits, the other VFO, A or B */

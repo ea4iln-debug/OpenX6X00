@@ -1457,7 +1457,7 @@ static void band_usable_check(void *arg) {
  * without the WR12 too, the band stays, and the base was left on the WR12 output (5.06 MHz) */
 static void on_wr12_change(Subject *subj, void *user_data) {
     band_usable_check(NULL);
-    radio_set_freq(cparam_i_get(cfg_fg_freq));  /* through the WR12 or not: on FM broadcast the band stays */
+    radio_set_freq(cparam_i_get(cfg_fg_freq));
     band_plan_reload();
     band_plan_refresh();
 }

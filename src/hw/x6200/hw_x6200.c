@@ -377,16 +377,20 @@ static pthread_mutex_t wr12_mx = PTHREAD_MUTEX_INITIALIZER;    /* the frequency 
 static pthread_cond_t  wr12_cv = PTHREAD_COND_INITIALIZER;
 static char            wr12_path[24];   /* /dev/ttyACMn it was found on */
 static int             wr12_fd = -1;
+/* Set by wr12_watch, read under the radio's lock */
 static volatile int    wr12_state = -1; /* hw_wr12_state() */
-static bool            wr12_ready;      /* set up since it was last found */
+static volatile bool   wr12_ready;      /* set up since it was last found (wr12_init) */
+static volatile bool   wr12_bypass_owed; /* AT+BYPASS=1 not answered: asked again each second */
+static volatile int32_t wr12_hz;        /* the frequency last asked of it, 0 to send it again (wr12_init) */
+/* Under the radio's lock (hw_vfo_set_freq, hw_set_i) */
 static bool            wr12_active;     /* listening through it: iqswap set, bypass off */
 static bool            wr12_in_use;     /* there and on: the base's TX kept to the ham bands */
 static bool            wr12_split;      /* split as the GUI asked it, held off in the base while listening through it */
-static volatile bool   wr12_bypass_owed; /* AT+BYPASS=1 not answered: asked again each second */
-static int32_t         wr12_hz;         /* the frequency last asked of it */
 static int32_t         wr12_vfo_hz[2];  /* what each VFO was last tuned to (hw_vfo_set_freq), 0 not yet */
-static int32_t         wr12_want;       /* a frequency for the thread to send, 0 none */
-static bool            wr12_ok;         /* the last command answered OK */
+/* Under wr12_mx */
+static int32_t         wr12_want;       /* a frequency for wr12_thread to send, 0 none */
+
+typedef enum { WR12_NOT_SENT, WR12_NO_OK, WR12_OK } wr12_res_t;
 
 /* Under wr12_io */
 static void wr12_close(void) {
@@ -418,7 +422,7 @@ static bool wr12_reply(int ms) {
 /* Under wr12_io. Each command waits for its answer, half a second, three tries, as the stock app's
  * (XWBReceiverComm::writeAtCommand(..., 500, 3)): two sent together, the WR12 dropped one (plugged in again on
  * 96.9 MHz: BYPASS=0 kept, the frequency lost, 144 MHz left); right after AT+INIT it took over 0.3 s */
-static bool wr12_write(const char *cmd, bool log) {
+static wr12_res_t wr12_write(const char *cmd, bool log) {
     char buf[48];
     int  n = snprintf(buf, sizeof(buf), "%s\r\n", cmd);
     bool ok = false, answered = false;
@@ -446,41 +450,27 @@ static bool wr12_write(const char *cmd, bool log) {
     if (log || !answered) {
         fprintf(stderr, "hw_x6200: WR12 %s%s\n", cmd, !ok ? " (not sent)" : answered ? "" : " (no OK)");
     }
-    wr12_ok = answered;
-    return ok;
+    return !ok ? WR12_NOT_SENT : answered ? WR12_OK : WR12_NO_OK;
 }
 
-/* Under wr12_io: `cmd` sent and OK back */
-static bool wr12_ask(const char *cmd) {
-    return wr12_write(cmd, true) && wr12_ok;
-}
-
-static bool wr12_at(const char *cmd) {
-    bool ok;
+/* wr12_write with the port taken */
+static wr12_res_t wr12_send(const char *cmd) {
+    wr12_res_t res;
 
     pthread_mutex_lock(&wr12_io);
-    ok = wr12_write(cmd, true);
+    res = wr12_write(cmd, true);
     pthread_mutex_unlock(&wr12_io);
-    return ok;
+    return res;
 }
 
-/* `cmd` sent to the WR12 and its OK back */
-static bool wr12_at_ok(const char *cmd) {
-    bool ok;
-
-    pthread_mutex_lock(&wr12_io);
-    ok = wr12_write(cmd, true) && wr12_ok;
-    pthread_mutex_unlock(&wr12_io);
-    return ok;
-}
-
+/* Set up as the stock app does; stops only when the port is gone (a setting not answered is sent on) */
 static void wr12_init(void) {
     static const char *const cmds[] = {
         "AT+INIT", "AT+LNAGAIN=15", "AT+VGAGAIN=0", "AT+MIXERGAIN=0", "AT+LNAAGCENA=1", "AT+MIXERAGCENA=1"
     };
 
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
-        if (!wr12_at(cmds[i])) {
+        if (wr12_send(cmds[i]) == WR12_NOT_SENT) {
             return;
         }
         usleep(50000);
@@ -519,7 +509,7 @@ static void wr12_gpsd(const char *how, const char *path) {
 
     snprintf(cmd, sizeof(cmd), "gpsdctl %s %s > /dev/null 2>&1", how, path);
     if (system(cmd) != 0) {
-        /* no gpsd running: nothing to give or take */
+        /* no gpsd running, or it never had it: nothing to give or take */
     }
 }
 
@@ -540,7 +530,7 @@ static void *wr12_watch(void *arg) {
             pthread_mutex_lock(&wr12_io);
             wr12_close();
             snprintf(wr12_path, sizeof(wr12_path), "%s", path);
-            ok = wr12_ask("AT+AYT");
+            ok = wr12_write("AT+AYT", true) == WR12_OK;
             if (!ok) {
                 wr12_close();
                 wr12_path[0] = '\0';
@@ -550,7 +540,7 @@ static void *wr12_watch(void *arg) {
                 wr12_init();
                 /* bypass on whatever: off again with the next tuning above 54 MHz (wr12_hz 0). Sent by this thread
                  * as listening through it was, a crossing to HF meanwhile left it out of bypass on HF */
-                wr12_bypass_owed = !wr12_at_ok("AT+BYPASS=1");
+                wr12_bypass_owed = wr12_send("AT+BYPASS=1") != WR12_OK;
                 fprintf(stderr, "hw_x6200: WR12 found on %s\n", path);
             } else {
                 wr12_gpsd("add", path);
@@ -572,7 +562,9 @@ static void *wr12_watch(void *arg) {
             }
             wr12_state = 0;
         }
-        if (wr12_bypass_owed && wr12_state == 1 && !wr12_active && wr12_at_ok("AT+BYPASS=1")) {
+        /* wr12_active read without the radio's lock: at worst a bypass sent just as it went off again, the WR12 deaf
+         * (never HF into it) until the next tune */
+        if (wr12_bypass_owed && wr12_state == 1 && !wr12_active && wr12_send("AT+BYPASS=1") == WR12_OK) {
             wr12_bypass_owed = false;
         }
         sleep(1);
@@ -618,7 +610,7 @@ static void wr12_start(void) {
     }
 }
 
-/* Under the radio's lock: never waits for the WR12 */
+/* Under the radio's lock: the frequency to wr12_thread, never waited for (the bypass is: wr12_enter, wr12_leave) */
 static void wr12_tune(int32_t hz) {
     pthread_mutex_lock(&wr12_mx);
     wr12_want = hz;
@@ -701,14 +693,14 @@ static void wr12_enter(void) {
         x6200_control_split_set(false);
     }
     iqswap_set(true);
-    wr12_at("AT+BYPASS=0");
+    wr12_send("AT+BYPASS=0");
     wr12_active = true;
 }
 
 /* Bypass on before the base is back on HF. Not answered with the WR12 there: asked again each second (wr12_watch),
  * as a WR12 out of bypass on HF would take the transmission */
 static void wr12_leave(void) {
-    wr12_bypass_owed = !wr12_at_ok("AT+BYPASS=1") && wr12_state == 1;
+    wr12_bypass_owed = wr12_send("AT+BYPASS=1") != WR12_OK && wr12_state == 1;
     iqswap_set(false);
     wr12_active = false;
     if (wr12_split) {
@@ -765,6 +757,7 @@ static void wr12_vfo_switched(radio_vfo_t vfo) {
  * sends any VFO there as 5060000), and the current VFO drives the WR12. The order keeps HF power off the WR12: into
  * it, the base leaves HF before the bypass goes off; out of it, the bypass is on before the base is back on HF */
 bool hw_vfo_set_freq(radio_vfo_t vfo, int32_t hz) {
+    /* on A/B the setting is already the new VFO: HW_VFO_CUR comes from its change (radio.c) */
     bool cur = vfo == (radio_vfo_t)param_i_get(cfg_band_current_vfo);
 
     wr12_vfo_hz[vfo == RADIO_VFO_B] = hz;
